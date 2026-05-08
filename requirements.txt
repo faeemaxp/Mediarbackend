@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pymongo
+motor
+pydantic
+pydantic-settings
+python-dotenv
+feedparser
+beautifulsoup4
+newspaper3k
+lxml_html_clean
+apscheduler
+typer
+httpx
+tabulate
+requests
