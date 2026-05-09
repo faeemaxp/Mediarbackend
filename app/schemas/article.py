@@ -9,11 +9,16 @@ class ArticleBase(BaseModel):
     url: str
     published_at: datetime
     category_tags: List[str] = []
+    topic_relevance: Optional[dict] = None
+    people: List[str] = []
+    organizations: List[str] = []
     keywords: List[str] = []
     sentiment: Optional[str] = None
     language: str = "en"
     summary: Optional[str] = None
+    ai_intelligence: Optional[str] = None
     priority_score: int = 0
+    is_saved: bool = False
     image_url: Optional[str] = None
 
 class ArticleCreate(ArticleBase):

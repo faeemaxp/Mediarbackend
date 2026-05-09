@@ -14,3 +14,7 @@ typer
 httpx
 tabulate
 requests
+gunicorn
+google-genai
+tenacity
+

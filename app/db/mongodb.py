@@ -7,6 +7,10 @@ class MongoDB:
     client: AsyncIOMotorClient = None
     db = None
 
+    @property
+    def logs(self):
+        return self.db.logs
+
 db = MongoDB()
 
 async def connect_to_mongo():

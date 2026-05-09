@@ -105,6 +105,40 @@ async def push_test_article(article: ArticleCreate):
         
     return {"message": "Article injected", "id": str(result.inserted_id)}
 
+@router.post("/trigger-briefing", dependencies=[Depends(verify_admin)])
+async def trigger_briefing():
+    from backend.app.services.briefing_service import generate_and_save_briefing
+    content, created_at = await generate_and_save_briefing(force=True)
+    return {"message": "Briefing triggered", "content": content, "created_at": created_at}
+
+@router.post("/retag-all", dependencies=[Depends(verify_admin)])
+async def trigger_retag_all():
+    from backend.app.services.topic_service import detect_topics_and_score
+    
+    cursor = db.db.articles.find({})
+    updated = 0
+    
+    async for article in cursor:
+        intelligence = detect_topics_and_score(article["title"], article["content"])
+        
+        # Use boolean flag to distinguish intelligence vs general news
+        is_intelligence = len(intelligence["topics"]) > 0 or intelligence.get("score", 0) >= 15
+            
+        await db.db.articles.update_one(
+            {"_id": article["_id"]},
+            {"$set": {
+                "category_tags": intelligence["topics"],
+                "topic_relevance": intelligence.get("topic_relevance", {}),
+                "priority_score": intelligence["score"],
+                "people": intelligence["people"],
+                "organizations": intelligence["organizations"],
+                "is_intelligence": is_intelligence
+            }}
+        )
+        updated += 1
+        
+    return {"message": "Retagging complete", "updated": updated}
+
 @router.delete("/sources/{source_id}", dependencies=[Depends(verify_admin)])
 async def delete_source(source_id: str):
     if not ObjectId.is_valid(source_id):
@@ -113,6 +147,15 @@ async def delete_source(source_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Source not found")
     return {"message": "Source deleted"}
+
+@router.get("/logs", dependencies=[Depends(verify_admin)])
+async def get_system_logs(limit: int = 50):
+    cursor = db.db.logs.find().sort("timestamp", -1).limit(limit)
+    logs = []
+    async for doc in cursor:
+        doc["id"] = str(doc.pop("_id"))
+        logs.append(doc)
+    return logs
 
 @router.patch("/sources/{source_id}", response_model=SourceResponse, dependencies=[Depends(verify_admin)])
 async def update_source(source_id: str, source_update: SourceUpdate):

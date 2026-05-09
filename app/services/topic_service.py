@@ -1,64 +1,173 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 import re
 
-# Priority categories and keywords
-POLITICAL_CATEGORIES = {
-    "BJP": ["modi", "bjp", "amit shah", "nda", "saffron party", "yogi adityanath", "jp nadda"],
-    "RSS": ["rss", "sangh", "sangh parivar", "rashtriya swayamsevak sangh", "mohan bhagwat", "shakha"],
-    "Congress": ["congress", "rahul gandhi", "sonia gandhi", "priyanka gandhi", "upa", "kharge"],
-    "Religion": ["hindu", "muslim", "temple", "religion", "mosque", "church", "faith", "religious", "sanatana"],
-    "Election": ["election", "poll", "vote", "seat", "constituency", "evm", "exit poll", "voter"]
+# Pipeline Configuration
+PIPELINES = {
+    "RSS": {
+        "keywords": ["rss", "sangh", "sangh parivar", "rashtriya swayamsevak sangh", "hindutva", "hindu nationalism", "cultural nationalism", "shakha"],
+        "individuals": ["mohan bhagwat", "dattatreya hosabale", "indresh kumar", "krishna gopal"],
+        "organizations": ["vhp", "bajrang dal", "abvp", "sewa bharati", "vishwa hindu parishad"]
+    },
+    "BJP": {
+        "keywords": ["bjp", "nda", "saffron party", "modi government", "governance", "lotus symbol"],
+        "individuals": ["narendra modi", "amit shah", "jp nadda", "yogi adityanath", "nirmala sitharaman", "rajnath singh", "s jaishankar"],
+        "organizations": ["bharatiya janata party", "nda alliance"]
+    },
+    "Congress": {
+        "keywords": ["congress", "india alliance", "upa", "hand symbol", "nyay yatra"],
+        "individuals": ["rahul gandhi", "sonia gandhi", "mallikarjun kharge", "priyanka gandhi", "shashi tharoor", "kc venugopal"],
+        "organizations": ["inc", "indian national congress", "youth congress"]
+    },
+    "Religion": {
+        "keywords": ["temple", "mosque", "religion", "communal", "conversion", "pilgrimage", "faith", "hindu", "muslim", "christian", "sikh", "waqf", "sanatana", "ayodhya", "kashi", "mathura"],
+        "individuals": [],
+        "organizations": []
+    },
+    "Election": {
+        "keywords": ["election", "poll", "vote", "seat sharing", "campaign", "manifesto", "evm", "exit poll", "voter list", "byelection", "constituency"],
+        "individuals": [],
+        "organizations": ["election commission", "eci"]
+    },
+    "Geopolitics": {
+        "keywords": ["china", "pakistan", "border", "foreign policy", "defence", "lac", "loc", "diplomacy", "quad", "brics", "g20"],
+        "individuals": [],
+        "organizations": ["mea", "ministry of external affairs"]
+    },
+    "Politics": {
+        "keywords": ["politics", "political", "government", "cabinet", "parliament", "assembly", "legislation", "bill", "opposition", "leader", "minister", "mla", "mp", "governor", "democracy", "protest", "rally", "policy"],
+        "individuals": [],
+        "organizations": []
+    }
 }
 
 # Keywords that boost priority significantly
-HIGH_PRIORITY_KEYWORDS = ["breaking", "urgent", "exclusive", "alert", "crisis", "victory", "defeat", "resigns", "protest"]
+HIGH_PRIORITY_KEYWORDS = ["breaking", "urgent", "exclusive", "alert", "crisis", "victory", "defeat", "resigns", "protest", "clash", "violence"]
 
-def detect_topics_and_score(title: str, content: str) -> Tuple[List[str], int]:
+# Global Exclusions: If any of these are found, the article is likely not political intelligence
+# This prevents sports, entertainment, or generic lifestyle news from leaking in.
+IRRELEVANT_KEYWORDS = [
+    "cricket", "ipl", "t20", "scorecard", "wicket", "stadium", "bollywood", "box office", 
+    "horoscope", "zodiac", "recipe", "fashion", "lifestyle", "gadgets", "smartphone review",
+    "gaming", "football", "tennis", "olympics", "misleading", "fake news alert", "viral video",
+    "unboxing", "deals", "discount", "stock market live", "weather update", "astrology"
+]
+
+def detect_topics_and_score(title: str, content: str) -> Dict:
     text = f"{title} {content}".lower()
+    title_lower = title.lower()
+    
+    # 1. Check for Global Exclusions FIRST
+    for exclude in IRRELEVANT_KEYWORDS:
+        if re.search(rf"\b{exclude}\b", text):
+            return {
+                "topics": [],
+                "topic_relevance": {},
+                "score": 0,
+                "people": [],
+                "organizations": []
+            }
+
     detected_topics = []
+    topic_relevance = {} 
+    found_people = set()
+    found_orgs = set()
     score = 0
     
-    # 1. Category Detection & Base Scoring
-    for category, keywords in POLITICAL_CATEGORIES.items():
-        matches = 0
-        for kw in keywords:
-            if kw in text:
-                matches += 1
+    for pipeline_name, config in PIPELINES.items():
+        matches = {
+            "keywords": 0,
+            "people": 0,
+            "orgs": 0
+        }
         
-        if matches > 0:
-            detected_topics.append(category)
-            score += 20  # Base score for category match
-            score += (matches * 5)  # Bonus for multiple keyword hits in same category
+        pipeline_keyword_bonus = 0
+        # Keyword matching with word boundaries
+        for kw in config["keywords"]:
+            if re.search(rf"\b{kw}\b", text):
+                matches["keywords"] += 1
+                if re.search(rf"\b{kw}\b", title_lower):
+                    pipeline_keyword_bonus += 10
+        
+        pipeline_people_bonus = 0
+        # Individual matching
+        for person in config["individuals"]:
+            if re.search(rf"\b{person}\b", text):
+                matches["people"] += 1
+                found_people.add(person.title())
+                if re.search(rf"\b{person}\b", title_lower):
+                    pipeline_people_bonus += 15
+        
+        pipeline_org_bonus = 0
+        # Organization matching
+        for org in config["organizations"]:
+            if re.search(rf"\b{org}\b", text):
+                matches["orgs"] += 1
+                found_orgs.add(org.upper())
+                if re.search(rf"\b{org}\b", title_lower):
+                    pipeline_org_bonus += 15
+
+        # Calculate pipeline-specific relevance
+        if matches["keywords"] > 0 or matches["people"] > 0 or matches["orgs"] > 0:
+            detected_topics.append(pipeline_name)
             
-    # 2. Multi-category Bonus
-    if len(detected_topics) > 1:
-        score += (len(detected_topics) * 10)
+            relevance = 20 # Base match
+            relevance += (matches["keywords"] * 5) + pipeline_keyword_bonus
+            relevance += (matches["people"] * 15) + pipeline_people_bonus
+            relevance += (matches["orgs"] * 10) + pipeline_org_bonus
+            
+            # Individual + Org overlap in same pipeline
+            if matches["people"] > 0 and matches["orgs"] > 0:
+                relevance += 20
+                
+            topic_relevance[pipeline_name] = min(relevance, 100)
+            score += relevance
+
+    # Cross-pipeline Overlap Scoring (Boosts total priority)
+    # 1. RSS + Political entities
+    if "RSS" in detected_topics and ("BJP" in detected_topics or "Congress" in detected_topics):
+        score += 30
         
-    # 3. High Priority Keyword Boosting
+    # 2. Religion + Political overlap
+    if "Religion" in detected_topics and any(t in detected_topics for t in ["BJP", "Congress", "RSS"]):
+        score += 25
+        
+    # 3. Election + Anything
+    if "Election" in detected_topics and len(detected_topics) > 1:
+        score += 20
+
+    # 4. Multi-category General Bonus
+    if len(detected_topics) > 1:
+        score += (len(detected_topics) * 5)
+        
+    # 5. High Priority Keyword Boosting
     for hpw in HIGH_PRIORITY_KEYWORDS:
         if hpw in text:
             score += 25
-            
-    # 4. Title Weighting (Keywords in title are more important)
-    title_lower = title.lower()
-    for category, keywords in POLITICAL_CATEGORIES.items():
-        for kw in keywords:
-            if kw in title_lower:
+            if hpw in title_lower:
                 score += 15
-                
-    return detected_topics, score
+
+    return {
+        "topics": detected_topics,
+        "topic_relevance": topic_relevance,
+        "score": min(score, 100), # Cap at 100
+        "people": list(found_people),
+        "organizations": list(found_orgs)
+    }
 
 async def process_article_topics(article_id: str, title: str, content: str):
     from backend.app.db.mongodb import db
     from bson import ObjectId
     
-    topics, score = detect_topics_and_score(title, content)
+    result = detect_topics_and_score(title, content)
     
     await db.db.articles.update_one(
         {"_id": ObjectId(article_id)},
         {"$set": {
-            "category_tags": topics,
-            "priority_score": score
+            "category_tags": result["topics"],
+            "topic_relevance": result["topic_relevance"],
+            "priority_score": result["score"],
+            "people": result["people"],
+            "organizations": result["organizations"]
         }}
     )
-    return topics, score
+    return result
