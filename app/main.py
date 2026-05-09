@@ -7,11 +7,23 @@ from app.core.scheduler import setup_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await connect_to_mongo()
-    scheduler = setup_scheduler()
+    scheduler = None
+    try:
+        await connect_to_mongo()
+        scheduler = setup_scheduler()
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to connect to MongoDB: {e}")
+    
     yield
-    scheduler.shutdown()
-    await close_mongo_connection()
+    
+    try:
+        if scheduler:
+            scheduler.shutdown()
+        await close_mongo_connection()
+    except Exception as e:
+        import logging
+        logging.warning(f"Error during shutdown: {e}")
 
 from app.api.articles import router as article_router
 from app.api.sources import router as source_router
