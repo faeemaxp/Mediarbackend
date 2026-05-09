@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from typing import List
-from backend.app.schemas.source import SourceCreate, SourceResponse
-from backend.app.db.mongodb import db
-from backend.app.services.rss_service import fetch_rss_feed
+from app.schemas.source import SourceCreate, SourceResponse
+from app.db.mongodb import db
+from app.services.rss_service import fetch_rss_feed
 from bson import ObjectId
 from datetime import datetime
 

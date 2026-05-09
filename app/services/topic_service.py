@@ -155,7 +155,7 @@ def detect_topics_and_score(title: str, content: str) -> Dict:
     }
 
 async def process_article_topics(article_id: str, title: str, content: str):
-    from backend.app.db.mongodb import db
+    from app.db.mongodb import db
     from bson import ObjectId
     
     result = detect_topics_and_score(title, content)

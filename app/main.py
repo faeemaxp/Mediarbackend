@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.app.db.mongodb import connect_to_mongo, close_mongo_connection
+from app.db.mongodb import connect_to_mongo, close_mongo_connection
 
-from backend.app.core.scheduler import setup_scheduler
+from app.core.scheduler import setup_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,9 +13,9 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
     await close_mongo_connection()
 
-from backend.app.api.articles import router as article_router
-from backend.app.api.sources import router as source_router
-from backend.app.api.admin import router as admin_router
+from app.api.articles import router as article_router
+from app.api.sources import router as source_router
+from app.api.admin import router as admin_router
 
 import os
 

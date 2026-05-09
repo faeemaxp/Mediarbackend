@@ -3,9 +3,9 @@ import os
 import sys
 
 # Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backend.app.db.mongodb import db, connect_to_mongo, close_mongo_connection
+from app.db.mongodb import db, connect_to_mongo, close_mongo_connection
 from datetime import datetime
 
 async def check_db():

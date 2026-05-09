@@ -5,8 +5,8 @@ import os
 import sys
 from tabulate import tabulate
 
-# Add project root to sys.path to resolve backend package
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+# Add project root to sys.path to resolve the app package
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 app = typer.Typer()
 
@@ -90,8 +90,8 @@ def retag_all():
     import asyncio
     
     async def run_retag():
-        from backend.app.db.mongodb import db, connect_to_mongo, close_mongo_connection
-        from backend.app.services.topic_service import detect_topics_and_score
+        from app.db.mongodb import db, connect_to_mongo, close_mongo_connection
+        from app.services.topic_service import detect_topics_and_score
         
         await connect_to_mongo()
         

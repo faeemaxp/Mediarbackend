@@ -1,6 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from backend.app.services.rss_service import fetch_rss_feed
-from backend.app.db.mongodb import db
+from app.services.rss_service import fetch_rss_feed
+from app.db.mongodb import db
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ async def fetch_all_feeds():
 
 async def generate_periodic_briefing_job():
     logger.info("Generating scheduled periodic briefing")
-    from backend.app.services.briefing_service import generate_and_save_briefing
+    from app.services.briefing_service import generate_and_save_briefing
     await generate_and_save_briefing(force=True)
 
 def setup_scheduler():

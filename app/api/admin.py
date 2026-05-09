@@ -1,17 +1,17 @@
 from fastapi import APIRouter, HTTPException, Header, Depends
 from typing import List, Optional
-from backend.app.schemas.source import SourceCreate, SourceUpdate, SourceResponse
-from backend.app.schemas.article import ArticleCreate
-from backend.app.db.mongodb import db
-from backend.app.services.rss_service import fetch_rss_feed
-from backend.app.services.topic_service import detect_topics_and_score
+from app.schemas.source import SourceCreate, SourceUpdate, SourceResponse
+from app.schemas.article import ArticleCreate
+from app.db.mongodb import db
+from app.services.rss_service import fetch_rss_feed
+from app.services.topic_service import detect_topics_and_score
 from bson import ObjectId
 from datetime import datetime, timezone
 import feedparser
 import time
 import os
 
-from backend.app.core.config import get_settings
+from app.core.config import get_settings
 
 router = APIRouter()
 settings = get_settings()
@@ -81,7 +81,7 @@ async def force_scrape(source_id: Optional[str] = None):
         return {"message": f"Fetched {len(count)} articles from {source['name']}"}
     else:
         # Force all
-        from backend.app.core.scheduler import fetch_all_feeds
+        from app.core.scheduler import fetch_all_feeds
         await fetch_all_feeds()
         return {"message": "All sources triggered for scraping"}
 
@@ -100,20 +100,20 @@ async def push_test_article(article: ArticleCreate):
     
     # Trigger alert if score is high
     if article_dict["priority_score"] >= 50:
-        from backend.app.services.notification_service import send_discord_alert
+        from app.services.notification_service import send_discord_alert
         await send_discord_alert(article_dict)
         
     return {"message": "Article injected", "id": str(result.inserted_id)}
 
 @router.post("/trigger-briefing", dependencies=[Depends(verify_admin)])
 async def trigger_briefing():
-    from backend.app.services.briefing_service import generate_and_save_briefing
+    from app.services.briefing_service import generate_and_save_briefing
     content, created_at = await generate_and_save_briefing(force=True)
     return {"message": "Briefing triggered", "content": content, "created_at": created_at}
 
 @router.post("/retag-all", dependencies=[Depends(verify_admin)])
 async def trigger_retag_all():
-    from backend.app.services.topic_service import detect_topics_and_score
+    from app.services.topic_service import detect_topics_and_score
     
     cursor = db.db.articles.find({})
     updated = 0

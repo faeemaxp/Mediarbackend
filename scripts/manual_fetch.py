@@ -7,10 +7,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backend.app.core.scheduler import fetch_all_feeds
-from backend.app.db.mongodb import connect_to_mongo, close_mongo_connection
+from app.core.scheduler import fetch_all_feeds
+from app.db.mongodb import connect_to_mongo, close_mongo_connection
 
 async def manual_fetch():
     print("Connecting to database...")

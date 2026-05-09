@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
-from backend.app.db.mongodb import db
-from backend.app.services.gemini_service import gemini_service
+from app.db.mongodb import db
+from app.services.gemini_service import gemini_service
 import logging
 
 logger = logging.getLogger(__name__)

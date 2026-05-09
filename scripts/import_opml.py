@@ -5,10 +5,10 @@ import sys
 from datetime import datetime, timezone
 
 # Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backend.app.db.mongodb import connect_to_mongo, close_mongo_connection, db
-from backend.app.schemas.source import SourceCreate
+from app.db.mongodb import connect_to_mongo, close_mongo_connection, db
+from app.schemas.source import SourceCreate
 
 async def import_opml(file_path: str):
     print(f"Parsing {file_path}...")

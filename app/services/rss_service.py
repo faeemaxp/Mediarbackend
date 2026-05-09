@@ -4,11 +4,11 @@ from datetime import datetime, timezone
 import time
 import hashlib
 from typing import List, Dict
-from backend.app.schemas.article import ArticleCreate
-from backend.app.db.mongodb import db
-from backend.app.services.topic_service import detect_topics_and_score
-from backend.app.services.notification_service import send_discord_alert
-from backend.app.services.gemini_service import gemini_service
+from app.schemas.article import ArticleCreate
+from app.db.mongodb import db
+from app.services.topic_service import detect_topics_and_score
+from app.services.notification_service import send_discord_alert
+from app.services.gemini_service import gemini_service
 import logging
 
 logger = logging.getLogger(__name__)

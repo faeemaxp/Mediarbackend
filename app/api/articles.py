@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
-from backend.app.schemas.article import ArticleResponse
-from backend.app.db.mongodb import db
+from app.schemas.article import ArticleResponse
+from app.db.mongodb import db
 from bson import ObjectId
 
 router = APIRouter()
@@ -30,7 +30,7 @@ async def get_trending():
 
 @router.get("/briefing")
 async def get_hourly_briefing():
-    from backend.app.services.briefing_service import generate_and_save_briefing
+    from app.services.briefing_service import generate_and_save_briefing
     content, created_at, edition = await generate_and_save_briefing()
     return {"briefing": content, "created_at": created_at, "edition": edition}
 
@@ -130,7 +130,7 @@ async def research_article(article_id: str):
     if article.get("ai_intelligence"):
         return {"ai_intelligence": article["ai_intelligence"]}
         
-    from backend.app.services.gemini_service import gemini_service
+    from app.services.gemini_service import gemini_service
     ai_info = await gemini_service.get_ai_intelligence(article["title"], article["content"])
     
     if ai_info:
