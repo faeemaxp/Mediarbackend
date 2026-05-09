@@ -17,4 +17,6 @@ requests
 gunicorn
 google-genai
 tenacity
+aiohttp
+nltk
 
