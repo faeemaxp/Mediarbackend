@@ -1,5 +1,5 @@
 from google import genai
-from google.genai import types
+from google.genai import types, errors
 from app.core.config import get_settings
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -78,6 +78,11 @@ class GeminiService:
             )
 
             return self._clean_markdown(response.text)
+        except errors.ClientError as ce:
+            if "User location is not supported" in str(ce):
+                logger.error("Gemini API Error: Your server region is not supported by Google AI. Please change deployment region to US or Europe.")
+                return None
+            raise
         except Exception as e:
             logger.error(f"Gemini AI Error: {e}")
             raise # Let tenacity retry
@@ -137,6 +142,11 @@ class GeminiService:
                 contents=prompt
             )
             return response.text.strip()
+        except errors.ClientError as ce:
+            if "User location is not supported" in str(ce):
+                logger.error("Gemini API Error: Your server region is not supported by Google AI. Please change deployment region to US or Europe.")
+                return None
+            raise
         except Exception as e:
             logger.error(f"Periodic Briefing Error: {e}")
             raise
@@ -183,6 +193,11 @@ class GeminiService:
                 contents=prompt
             )
             return self._clean_markdown(response.text)
+        except errors.ClientError as ce:
+            if "User location is not supported" in str(ce):
+                logger.error("Gemini API Error: Your server region is not supported by Google AI. Please change deployment region to US or Europe.")
+                return None
+            raise
         except Exception as e:
             logger.error(f"Briefing Generation Error: {e}")
             raise # Let tenacity retry

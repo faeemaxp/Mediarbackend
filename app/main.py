@@ -39,12 +39,17 @@ app.include_router(admin_router, prefix="/admin", tags=["admin"])
 
 # CORS Configuration
 # Format: http://localhost:3000,https://mediaradar.vercel.app
-origins = os.getenv("CORS_ORIGINS", "*").split(",")
+raw_origins = os.getenv("CORS_ORIGINS", "*").split(",")
+origins = [origin.strip().rstrip("/") for origin in raw_origins]
+
+# Special handling for '*' with allow_credentials=True
+# If origins is ['*'], we must set allow_credentials=False for security and compatibility
+is_wildcard = "*" in origins
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=not is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
