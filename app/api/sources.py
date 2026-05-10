@@ -4,14 +4,14 @@ from app.schemas.source import SourceCreate, SourceResponse
 from app.db.mongodb import db
 from app.services.rss_service import fetch_rss_feed
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter()
 
 @router.post("/", response_model=SourceResponse)
 async def create_source(source: SourceCreate):
     source_dict = source.model_dump()
-    source_dict["created_at"] = datetime.utcnow()
+    source_dict["created_at"] = datetime.now(timezone.utc)
     result = await db.db.sources.insert_one(source_dict)
     source_dict["id"] = str(result.inserted_id)
     return source_dict

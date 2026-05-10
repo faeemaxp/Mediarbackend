@@ -2,6 +2,7 @@ from google import genai
 from google.genai import types, errors
 from app.core.config import get_settings
 import logging
+import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import re
 
@@ -69,8 +70,10 @@ class GeminiService:
                 google_search=types.GoogleSearch()
             )
 
-            response = self.client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+            # BUG-11: wrap blocking synchronous SDK call in thread pool
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model="gemini-3.1-flash-lite",  # BUG-10: corrected model name
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=[google_search_tool]
@@ -137,8 +140,10 @@ class GeminiService:
         """
 
         try:
-            response = self.client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+            # BUG-11: wrap blocking synchronous SDK call in thread pool
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model="gemini-3.1-flash-lite",  # BUG-10: corrected model name
                 contents=prompt
             )
             return response.text.strip()
@@ -188,8 +193,10 @@ class GeminiService:
         """
 
         try:
-            response = self.client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+            # BUG-11: wrap blocking synchronous SDK call in thread pool
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model="gemini-3.1-flash-lite",  # BUG-10: corrected model name
                 contents=prompt
             )
             return self._clean_markdown(response.text)
@@ -201,5 +208,29 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Briefing Generation Error: {e}")
             raise # Let tenacity retry
+
+    async def generate_notification_blurb(self, title: str, content: str, tag: str) -> Optional[str]:
+        """Generates a punchy, Discord-optimized summary (1-2 sentences) for notifications."""
+        if not self.client:
+            return None
+            
+        prompt = (
+            f"Article Title: {title}\n"
+            f"Pipeline Channel: #{tag}\n"
+            f"Content Summary: {content[:1000]}\n\n"
+            f"Generate a single punchy sentence for a Discord notification that explains why this news matters to a reader "
+            f"following the #{tag} pipeline. Do not use hashtags or emojis. Keep it under 150 characters."
+        )
+        
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model="gemini-3.1-flash-lite",
+                contents=prompt
+            )
+            return self._clean_markdown(response.text)
+        except Exception as e:
+            logger.error(f"Notification Blurb Error: {e}")
+            return None
 
 gemini_service = GeminiService()

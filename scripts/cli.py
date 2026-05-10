@@ -126,5 +126,112 @@ def retag_all():
 
     asyncio.run(run_retag())
 
+@app.command()
+def instagram_fetch(query: str = "#news", limit: int = 10):
+    """Fetch trending posts from Instagram using Apify."""
+    import asyncio
+    
+    async def run_fetch():
+        from app.db.mongodb import connect_to_mongo, close_mongo_connection
+        from app.services.instagram_service import fetch_instagram_news
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        await connect_to_mongo()
+        
+        print(f"Fetching {limit} latest trending posts for: {query}")
+        articles = await fetch_instagram_news(query=query, limit=limit)
+        
+        print(f"Finished! Ingested {len(articles)} new articles.")
+        for art in articles:
+            print(f"- {art['title']} ({art['url']})")
+            
+        await close_mongo_connection()
+
+    asyncio.run(run_fetch())
+
+@app.command()
+def x_fetch(limit: int = 10):
+    """Fetch trending posts from right-wing media on X using Apify."""
+    import asyncio
+    
+    async def run_fetch():
+        from app.db.mongodb import connect_to_mongo, close_mongo_connection
+        from app.services.x_service import fetch_x_news
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        await connect_to_mongo()
+        
+        print(f"Fetching {limit} latest posts from right-wing media on X...")
+        articles = await fetch_x_news(limit=limit)
+        
+        print(f"Finished! Ingested {len(articles)} new articles.")
+        for art in articles:
+            print(f"- {art['title']} ({art['url']})")
+            
+        await close_mongo_connection()
+
+    asyncio.run(run_fetch())
+
+@app.command()
+def push_latest_to_discord():
+    """Push the single latest article for every tag to its Discord channel."""
+    import asyncio
+    
+    async def run_push():
+        from app.db.mongodb import connect_to_mongo, close_mongo_connection
+        from app.services.notification_service import send_discord_alert
+        from app.db.mongodb import db
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        await connect_to_mongo()
+        
+        TAGS = ["RSS", "BJP", "Congress", "Religion", "Election", "Geopolitics", "Politics", "Tamil", "General"]
+        print("🚀 Pushing latest articles for every tag to Discord...")
+        
+        for tag in TAGS:
+            query = {"category_tags": tag} if tag != "General" else {"$or": [{"category_tags": {"$size": 0}}, {"category_tags": "General"}]}
+            article = await db.db.articles.find_one(query, sort=[("published_at", -1)])
+            
+            if article:
+                print(f"Found latest for [{tag}]: {article['title']}")
+                await send_discord_alert(article)
+            else:
+                print(f"ℹ️ No articles found for tag: {tag}")
+
+        print("\n🏁 Push completed. Notifications queued.")
+        await close_mongo_connection()
+
+    asyncio.run(run_push())
+
+@app.command()
+def push_high_priority(limit: int = 10):
+    """Push the top highest-scoring articles to Discord."""
+    import asyncio
+    
+    async def run_push():
+        from app.db.mongodb import connect_to_mongo, close_mongo_connection
+        from app.services.notification_service import send_discord_alert
+        from app.db.mongodb import db
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        await connect_to_mongo()
+        
+        print(f"🚀 Identifying top {limit} Elite Intelligence articles...")
+        cursor = db.db.articles.find().sort("priority_score", -1).limit(limit)
+        articles = await cursor.to_list(length=limit)
+        
+        for art in articles:
+            print(f"Elite article [{art['priority_score']}]: {art['title']}")
+            await send_discord_alert(art)
+            
+        print("\n🏁 Elite push completed. Notifications queued.")
+        await close_mongo_connection()
+
+    asyncio.run(run_push())
+
 if __name__ == "__main__":
     app()

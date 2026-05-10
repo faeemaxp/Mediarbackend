@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, HttpUrl
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 class ArticleBase(BaseModel):
@@ -34,7 +34,7 @@ class ArticleUpdate(BaseModel):
 
 class ArticleInDB(ArticleBase):
     id: str = Field(alias="_id")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ArticleResponse(ArticleBase):
     id: str

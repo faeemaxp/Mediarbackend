@@ -3,6 +3,7 @@ from typing import List, Optional
 from app.schemas.article import ArticleResponse
 from app.db.mongodb import db
 from bson import ObjectId
+import re
 
 router = APIRouter()
 
@@ -55,9 +56,10 @@ async def get_articles(
     if only_saved:
         query["is_saved"] = True
     if search:
+        safe_search = re.escape(search)  # SEC-04: prevent ReDoS via user-supplied regex
         query["$or"] = [
-            {"title": {"$regex": search, "$options": "i"}},
-            {"content": {"$regex": search, "$options": "i"}}
+            {"title": {"$regex": safe_search, "$options": "i"}},
+            {"content": {"$regex": safe_search, "$options": "i"}}
         ]
     
     # Sorting Logic

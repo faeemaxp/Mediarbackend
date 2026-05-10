@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Header, Depends, BackgroundTasks
 from typing import List, Optional
 from app.schemas.source import SourceCreate, SourceUpdate, SourceResponse
 from app.schemas.article import ArticleCreate
@@ -6,8 +6,9 @@ from app.db.mongodb import db
 from app.services.rss_service import fetch_rss_feed
 from app.services.topic_service import detect_topics_and_score
 from bson import ObjectId
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import feedparser
+import asyncio
 import time
 import os
 
@@ -22,7 +23,7 @@ async def verify_admin(x_admin_token: str = Header(...)):
 
 @router.get("/sources", response_model=List[SourceResponse], dependencies=[Depends(verify_admin)])
 async def get_admin_sources():
-    cursor = db.db.sources.find()
+    cursor = db.db.sources.find().sort("order", 1)
     sources = []
     async for doc in cursor:
         doc["id"] = str(doc.pop("_id"))
@@ -30,6 +31,21 @@ async def get_admin_sources():
             doc["health"] = {"status": "unknown"}
         sources.append(doc)
     return sources
+
+@router.post("/sources/", response_model=SourceResponse, dependencies=[Depends(verify_admin)])
+async def create_admin_source(source: SourceCreate):
+    source_dict = source.model_dump()
+    source_dict["created_at"] = datetime.now(timezone.utc)
+    # Initialize health
+    source_dict["health"] = {
+        "status": "active",
+        "fail_count": 0,
+        "avg_response_time": 0.0,
+        "total_articles_ingested": 0
+    }
+    result = await db.db.sources.insert_one(source_dict)
+    source_dict["id"] = str(result.inserted_id)
+    return source_dict
 
 @router.post("/test-source", dependencies=[Depends(verify_admin)])
 async def test_source(rss_url: str):
@@ -108,8 +124,8 @@ async def push_test_article(article: ArticleCreate):
 @router.post("/trigger-briefing", dependencies=[Depends(verify_admin)])
 async def trigger_briefing():
     from app.services.briefing_service import generate_and_save_briefing
-    content, created_at = await generate_and_save_briefing(force=True)
-    return {"message": "Briefing triggered", "content": content, "created_at": created_at}
+    content, created_at, edition = await generate_and_save_briefing(force=True)
+    return {"message": "Briefing triggered", "content": content, "created_at": created_at, "edition": edition}
 
 @router.post("/retag-all", dependencies=[Depends(verify_admin)])
 async def trigger_retag_all():
@@ -138,6 +154,40 @@ async def trigger_retag_all():
         updated += 1
         
     return {"message": "Retagging complete", "updated": updated}
+
+@router.post("/sources/{source_id}/move", dependencies=[Depends(verify_admin)])
+async def move_source(source_id: str, direction: str):
+    if not ObjectId.is_valid(source_id):
+        raise HTTPException(status_code=400, detail="Invalid ID")
+    
+    # Get all sources to determine current order
+    sources = await db.db.sources.find().to_list(1000)
+    
+    idx = -1
+    for i, s in enumerate(sources):
+        if str(s["_id"]) == source_id:
+            idx = i
+            break
+    
+    if idx == -1:
+        raise HTTPException(status_code=404, detail="Source not found")
+    
+    if direction == "up" and idx > 0:
+        # Swap with previous
+        sources[idx], sources[idx-1] = sources[idx-1], sources[idx]
+    elif direction == "down" and idx < len(sources) - 1:
+        # Swap with next
+        sources[idx], sources[idx+1] = sources[idx+1], sources[idx]
+    else:
+        return {"message": "Already at boundary"}
+
+    # In a real system we'd use a dedicated 'order' field, 
+    # but since we are relying on retrieval order, we can't easily swap without a field.
+    # Let's add an 'order' field if it doesn't exist.
+    for i, s in enumerate(sources):
+        await db.db.sources.update_one({"_id": s["_id"]}, {"$set": {"order": i}})
+        
+    return {"message": "Source order updated"}
 
 @router.delete("/sources/{source_id}", dependencies=[Depends(verify_admin)])
 async def delete_source(source_id: str):
@@ -175,3 +225,90 @@ async def update_source(source_id: str, source_update: SourceUpdate):
         
     result["id"] = str(result.pop("_id"))
     return result
+
+
+@router.get("/stats", dependencies=[Depends(verify_admin)])
+async def get_system_stats():
+    """Comprehensive system stats for the admin dashboard."""
+    now = datetime.now(timezone.utc)
+    last_24h = now - timedelta(hours=24)
+    last_1h  = now - timedelta(hours=1)
+
+    # Article counts
+    total_articles   = await db.db.articles.count_documents({})
+    articles_24h     = await db.db.articles.count_documents({"published_at": {"$gte": last_24h}})
+    articles_1h      = await db.db.articles.count_documents({"published_at": {"$gte": last_1h}})
+    saved_articles   = await db.db.articles.count_documents({"is_saved": True})
+    high_priority    = await db.db.articles.count_documents({"priority_score": {"$gte": 75}})
+
+    # Source health
+    total_sources  = await db.db.sources.count_documents({})
+    active_sources = await db.db.sources.count_documents({"active": True})
+    failing_sources= await db.db.sources.count_documents({"health.status": "failing"})
+
+    # Per-pipeline breakdown
+    TAGS = ["BJP", "Congress", "RSS", "Religion", "Election", "Geopolitics", "Politics", "Tamil"]
+    pipeline_counts = {}
+    for tag in TAGS:
+        pipeline_counts[tag] = await db.db.articles.count_documents({"category_tags": tag})
+
+    # Latest briefing
+    latest_briefing = await db.db.briefings.find_one(sort=[("created_at", -1)])
+    briefing_info = None
+    if latest_briefing:
+        briefing_info = {
+            "edition": latest_briefing.get("edition", "unknown"),
+            "created_at": latest_briefing.get("created_at"),
+            "preview": (latest_briefing.get("content", "") or "")[:200]
+        }
+
+    # Notification queue depth
+    from app.services.notification_service import notification_queue, hourly_counter, HOURLY_CAP
+    queue_depth = notification_queue.qsize()
+
+    # Digest state per channel
+    digest_states = []
+    async for row in db.db.digest_state.find():
+        digest_states.append({
+            "tag": row.get("tag"),
+            "last_style": row.get("last_style"),
+            "last_digest": row.get("last_digest"),
+        })
+
+    return {
+        "articles": {
+            "total": total_articles,
+            "last_24h": articles_24h,
+            "last_1h": articles_1h,
+            "saved": saved_articles,
+            "high_priority": high_priority,
+        },
+        "sources": {
+            "total": total_sources,
+            "active": active_sources,
+            "failing": failing_sources,
+        },
+        "pipelines": pipeline_counts,
+        "notifications": {
+            "queue_depth": queue_depth,
+            "hourly_sent": hourly_counter,
+            "hourly_cap": HOURLY_CAP,
+        },
+        "briefing": briefing_info,
+        "digest_states": digest_states,
+        "generated_at": now,
+    }
+
+
+@router.post("/test-digest", dependencies=[Depends(verify_admin)])
+async def test_digest(tag: str = "General", background_tasks: BackgroundTasks = None):
+    """Manually trigger a digest for a specific channel tag (for testing)."""
+    from app.services.notification_service import send_channel_digest, get_webhook_for_tag
+    webhook_url = await get_webhook_for_tag(tag)
+    if not webhook_url:
+        raise HTTPException(status_code=404, detail=f"No webhook configured for #{tag}")
+    # Run in background so the API returns immediately
+    async def _run():
+        await send_channel_digest(tag, webhook_url)
+    asyncio.create_task(_run())
+    return {"message": f"Digest triggered for #{tag}", "webhook_found": True}

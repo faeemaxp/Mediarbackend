@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def get_time_of_day():
-    hour = datetime.now().hour
+    hour = datetime.now(timezone.utc).hour  # BUG-08: use UTC to match APScheduler cron jobs
     if 4 <= hour < 12:
         return "morning"
     elif 12 <= hour < 18:

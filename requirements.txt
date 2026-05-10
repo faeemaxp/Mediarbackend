@@ -19,4 +19,6 @@ google-genai
 tenacity
 aiohttp
 nltk
+apify-client
+disnake
 

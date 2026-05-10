@@ -3,6 +3,7 @@ from newspaper import Article as NewspaperArticle
 from datetime import datetime, timezone
 import time
 import hashlib
+import asyncio
 from typing import List, Dict
 from app.schemas.article import ArticleCreate
 from app.db.mongodb import db
@@ -46,8 +47,9 @@ def clean_url(url: str) -> str:
 
 async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
     start_time = time.time()
+    duration = 0.0  # BUG-03: initialize before try so health update can always access it
     try:
-        feed = feedparser.parse(feed_url)
+        feed = await asyncio.to_thread(feedparser.parse, feed_url)
         duration = time.time() - start_time
         await log_event("INFO", f"Fetched {source_name}", {"url": feed_url, "duration": duration, "articles": len(feed.entries)})
     except Exception as e:
@@ -102,39 +104,37 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
             # Skip extraction for obvious non-HTML content
             if not link.lower().endswith(('.pdf', '.jpg', '.png', '.jpeg', '.gif', '.zip')):
                 try:
-                    # Added configuration to NewspaperArticle to be less aggressive
-                    from newspaper import Config
-                    config = Config()
-                    config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                    config.request_timeout = 10
-                    
-                    article_data = NewspaperArticle(link, config=config)
-                    article_data.download()
-                    article_data.parse()
-                    
-                    # NLP for keywords and summary
-                    try:
-                        import nltk
+                    # ARCH-07: Run blocking newspaper3k calls in a thread pool
+                    def _extract_article(url: str):
+                        from newspaper import Config
+                        config = Config()
+                        config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        config.request_timeout = 10
+                        art = NewspaperArticle(url, config=config)
+                        art.download()
+                        art.parse()
                         try:
-                            nltk.data.find('tokenizers/punkt_tab')
-                        except (LookupError, AttributeError):
-                            nltk.download('punkt', quiet=True)
-                            nltk.download('punkt_tab', quiet=True)
-                        
-                        article_data.nlp()
-                        content = article_data.text
-                        if hasattr(article_data, 'keywords'):
-                            keywords = article_data.keywords
-                        if hasattr(article_data, 'summary'):
-                            summary = article_data.summary
-                    except Exception as nlp_ex:
-                        logger.warning(f"NLP extraction failed for {link}: {nlp_ex}")
-                        content = article_data.text
-                        
+                            import nltk
+                            try:
+                                nltk.data.find('tokenizers/punkt_tab')
+                            except (LookupError, AttributeError):
+                                nltk.download('punkt', quiet=True)
+                                nltk.download('punkt_tab', quiet=True)
+                            art.nlp()
+                        except Exception:
+                            pass
+                        return art
+
+                    article_data = await asyncio.to_thread(_extract_article, link)
+
+                    content = article_data.text
+                    if hasattr(article_data, 'keywords'):
+                        keywords = article_data.keywords
+                    if hasattr(article_data, 'summary'):
+                        summary = article_data.summary
                     if hasattr(article_data, 'top_image') and article_data.top_image:
                         image_url = article_data.top_image
                 except Exception as ex:
-                    # Downgraded to warning to avoid polluting logs with every 404
                     logger.warning(f"Full text extraction skipped for {link}: {ex}")
             
             if not content:
@@ -182,8 +182,10 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
             await db.db.articles.insert_one(article_dict)
             articles.append(article_dict)
             
-            # Elite Notification Trigger: Only alert for extremely high priority (80+)
-            if intelligence["score"] >= 80:
+            # Elite Notification Trigger: Only alert for high priority (default 80+)
+            from app.core.config import get_settings
+            settings = get_settings()
+            if intelligence["score"] >= settings.MIN_PRIORITY_SCORE:
                 await send_discord_alert(article_dict)
             
             new_ingested += 1

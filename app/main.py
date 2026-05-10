@@ -4,22 +4,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
 
 from app.core.scheduler import setup_scheduler
+from app.services.discord_service import start_bot, stop_bot
+import asyncio
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = None
+    discord_task = None
     try:
         await connect_to_mongo()
         scheduler = setup_scheduler()
+        # Start Discord Bot in background
+        discord_task = asyncio.create_task(start_bot())
     except Exception as e:
         import logging
-        logging.warning(f"Failed to connect to MongoDB: {e}")
+        logging.warning(f"Failed to initialize services: {e}")
     
     yield
     
     try:
         if scheduler:
             scheduler.shutdown()
+        if discord_task:
+            await stop_bot()
+            discord_task.cancel()
         await close_mongo_connection()
     except Exception as e:
         import logging

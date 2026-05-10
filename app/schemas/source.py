@@ -12,8 +12,8 @@ class SourceHealth(BaseModel):
 
 class SourceBase(BaseModel):
     name: str
-    url: Optional[HttpUrl] = None
-    rss_url: Optional[HttpUrl] = None
+    url: Optional[str] = None
+    rss_url: Optional[str] = None
     category: str = "general"
     categories: List[str] = [] # Multiple tags support
     active: bool = True
@@ -25,8 +25,8 @@ class SourceCreate(SourceBase):
 
 class SourceUpdate(BaseModel):
     name: Optional[str] = None
-    url: Optional[HttpUrl] = None
-    rss_url: Optional[HttpUrl] = None
+    url: Optional[str] = None
+    rss_url: Optional[str] = None
     category: Optional[str] = None
     categories: Optional[List[str]] = None
     active: Optional[bool] = None

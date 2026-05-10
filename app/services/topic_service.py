@@ -37,11 +37,20 @@ PIPELINES = {
         "keywords": ["politics", "political", "government", "cabinet", "parliament", "assembly", "legislation", "bill", "opposition", "leader", "minister", "mla", "mp", "governor", "democracy", "protest", "rally", "policy"],
         "individuals": [],
         "organizations": []
+    },
+    "Tamil": {
+        "keywords": ["tamil nadu", "chennai", "dmk", "admk", "stalin", "annamalai", "eps", "ops", "puducherry", "dravidian", "cauvery", "jallikattu", "periyar", "தமிழ்நாடு", "சென்னை", "திமுக", "அதிமுக", "ஸ்டாலின்", "அண்ணாமலை", "எடப்பாடி பழனிசாமி", "ஓ. பன்னீர்செல்வம்", "பெரியார்", "திராவிட", "காவிரி"],
+        "individuals": ["m.k. stalin", "uadhayanidhi stalin", "k. annamalai", "edappadi palaniswami", "o. panneerselvam", "ஸ்டாலின்", "அண்ணாமலை"],
+        "organizations": ["dmk", "aiadmk", "ntk", "pmk", "vck", "திமுக", "அதிமுக"]
     }
 }
 
 # Keywords that boost priority significantly
-HIGH_PRIORITY_KEYWORDS = ["breaking", "urgent", "exclusive", "alert", "crisis", "victory", "defeat", "resigns", "protest", "clash", "violence"]
+HIGH_PRIORITY_KEYWORDS = [
+    "breaking", "urgent", "exclusive", "alert", "crisis", "victory", "defeat", 
+    "resigns", "protest", "clash", "violence", "investigation", "controversy",
+    "scandal", "verdict", "arrest", "summons", "cbi", "ed", "income tax", "raid"
+]
 
 # Global Exclusions: If any of these are found, the article is likely not political intelligence
 # This prevents sports, entertainment, or generic lifestyle news from leaking in.
@@ -141,9 +150,9 @@ def detect_topics_and_score(title: str, content: str) -> Dict:
         
     # 5. High Priority Keyword Boosting
     for hpw in HIGH_PRIORITY_KEYWORDS:
-        if hpw in text:
+        if re.search(rf"\b{re.escape(hpw)}\b", text):
             score += 25
-            if hpw in title_lower:
+            if re.search(rf"\b{re.escape(hpw)}\b", title_lower):
                 score += 15
 
     return {
