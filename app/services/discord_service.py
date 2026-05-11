@@ -105,53 +105,6 @@ class IntelligenceView(disnake.ui.View):
             logger.error(f"Save button error: {exc}")
             await interaction.response.send_message("❌ Failed to save.", ephemeral=True)
 
-    @disnake.ui.button(label="Deep Research (AI)", style=disnake.ButtonStyle.primary, emoji="🧠", row=0)
-    async def research_intel(self, interaction: disnake.MessageInteraction, button: disnake.ui.Button):
-        """Runs Gemini AI research and posts results in a thread."""
-        await interaction.response.defer(ephemeral=True)
-
-        from app.services.gemini_service import gemini_service
-        from bson import ObjectId
-
-        try:
-            article = await db.db.articles.find_one({"_id": ObjectId(self.article_id)})
-            if not article:
-                await interaction.followup.send("❌ Article not found.", ephemeral=True)
-                return
-
-            # Check cached result first
-            if article.get("ai_intelligence"):
-                ai_content = article["ai_intelligence"]
-            else:
-                ai_content = await gemini_service.get_ai_intelligence(
-                    article["title"], article["content"]
-                )
-                if ai_content:
-                    await db.db.articles.update_one(
-                        {"_id": ObjectId(self.article_id)},
-                        {"$set": {"ai_intelligence": ai_content}},
-                    )
-
-            if not ai_content:
-                await interaction.followup.send("❌ AI research unavailable.", ephemeral=True)
-                return
-
-            # Post in a thread to keep the channel clean
-            thread = await interaction.message.create_thread(
-                name=f"🧠 Research: {article['title'][:45]}",
-                auto_archive_duration=60,
-            )
-            chunks = [ai_content[i:i+1990] for i in range(0, len(ai_content), 1990)]
-            for chunk in chunks:
-                await thread.send(chunk)
-
-            await interaction.followup.send(
-                f"🧠 Deep research posted → {thread.mention}", ephemeral=True
-            )
-        except Exception as exc:
-            logger.error(f"Research button error: {exc}", exc_info=True)
-            await interaction.followup.send(f"❌ Error: {exc}", ephemeral=True)
-
 
 # ---------------------------------------------------------------------------
 # Pagination view for /saves
@@ -276,21 +229,80 @@ class DiscordBot(commands.Bot):
         inter: disnake.ApplicationCommandInteraction,
         error: Exception,
     ):
-        logger.error(f"Slash command error in /{inter.data.name}: {error}", exc_info=True)
-        msg = f"❌ Error: {error}"
+        if isinstance(error, commands.CheckFailure):
+            msg = str(error)
+        else:
+            logger.error(f"Slash command error in /{inter.data.name}: {error}", exc_info=True)
+            msg = f"❌ Error: {error}"
+            
         try:
-            await inter.edit_original_response(content=msg)
+            if not inter.response.is_done():
+                await inter.response.send_message(msg, ephemeral=True)
+            else:
+                await inter.edit_original_response(content=msg)
         except Exception:
-            await inter.response.send_message(msg, ephemeral=True)
+            pass
 
     async def on_command_error(self, ctx: commands.Context, error: Exception):
         if isinstance(error, commands.CommandNotFound):
             return
+        if isinstance(error, commands.CheckFailure):
+            await ctx.send(str(error))
+            return
+            
         logger.error(f"Prefix command error: {error}")
         await ctx.send(f"❌ Error: {error}")
 
 
 bot = DiscordBot()
+
+
+# ---------------------------------------------------------------------------
+# Global Authentication Check
+# ---------------------------------------------------------------------------
+
+async def is_authorized(user_id: int) -> bool:
+    doc = await db.db.bot_users.find_one({"user_id": str(user_id)})
+    return bool(doc)
+
+@bot.check
+async def global_prefix_check(ctx: commands.Context):
+    if ctx.command and ctx.command.name == "auth":
+        return True
+    
+    if not await is_authorized(ctx.author.id):
+        raise commands.CheckFailure("❌ Access Denied. Use `!auth <admin_token>` to authenticate.")
+    return True
+
+@bot.application_command_check()
+async def global_slash_check(inter: disnake.ApplicationCommandInteraction):
+    if not await is_authorized(inter.author.id):
+        raise commands.CheckFailure("❌ Access Denied. You are not authenticated. Use `!auth <admin_token>`.")
+    return True
+
+@bot.command(name="auth")
+async def prefix_auth(ctx: commands.Context, token: str = None):
+    """One-time authentication to use the bot."""
+    if not token:
+        await ctx.send("❌ Usage: `!auth <admin_token>`")
+        return
+        
+    if token != settings.ADMIN_TOKEN:
+        await ctx.send("❌ Invalid token.")
+        return
+        
+    await db.db.bot_users.update_one(
+        {"user_id": str(ctx.author.id)},
+        {"$set": {"user_id": str(ctx.author.id), "authenticated_at": datetime.now(timezone.utc)}},
+        upsert=True
+    )
+    
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+        
+    await ctx.send("✅ Authentication successful! You now have full access to MediaRadar.")
 
 
 # ---------------------------------------------------------------------------
