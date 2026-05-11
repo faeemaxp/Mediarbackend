@@ -88,10 +88,15 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
                 except (ValueError, TypeError, OverflowError):
                     pass
             
+            # Initial fast check with summary
+            pre_summary = entry.get('summary', entry.get('description', ''))
+            pre_content = pre_summary if pre_summary else entry.title
+            pre_intelligence = detect_topics_and_score(entry.title, pre_content)
+            
             # Use newspaper3k to get full content if possible
             content = ""
             keywords = []
-            summary = ""
+            summary = pre_summary
             image_url = None
             
             # Check RSS enclosures for image fallback
@@ -101,55 +106,58 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
                         image_url = enc.href
                         break
             
-            # Skip extraction for obvious non-HTML content
-            if not link.lower().endswith(('.pdf', '.jpg', '.png', '.jpeg', '.gif', '.zip')):
-                try:
-                    # ARCH-07: Run blocking newspaper3k calls in a thread pool
-                    def _extract_article(url: str):
-                        from newspaper import Config
-                        config = Config()
-                        config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                        config.request_timeout = 10
-                        art = NewspaperArticle(url, config=config)
-                        art.download()
-                        art.parse()
-                        try:
-                            import nltk
+            # Only do expensive extraction if preliminary score > 0 or has topics
+            # This drastically cuts down server usage
+            if pre_intelligence["score"] > 0 or len(pre_intelligence["topics"]) > 0:
+                # Skip extraction for obvious non-HTML content
+                if not link.lower().endswith(('.pdf', '.jpg', '.png', '.jpeg', '.gif', '.zip')):
+                    try:
+                        # ARCH-07: Run blocking newspaper3k calls in a thread pool
+                        def _extract_article(url: str):
+                            from newspaper import Config
+                            config = Config()
+                            config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                            config.request_timeout = 10
+                            art = NewspaperArticle(url, config=config)
+                            art.download()
+                            art.parse()
                             try:
-                                nltk.data.find('tokenizers/punkt_tab')
-                            except (LookupError, AttributeError):
-                                nltk.download('punkt', quiet=True)
-                                nltk.download('punkt_tab', quiet=True)
-                            art.nlp()
-                        except Exception:
-                            pass
-                        return art
+                                import nltk
+                                try:
+                                    nltk.data.find('tokenizers/punkt_tab')
+                                except (LookupError, AttributeError):
+                                    nltk.download('punkt', quiet=True)
+                                    nltk.download('punkt_tab', quiet=True)
+                                art.nlp()
+                            except Exception:
+                                pass
+                            return art
 
-                    article_data = await asyncio.to_thread(_extract_article, link)
+                        article_data = await asyncio.to_thread(_extract_article, link)
 
-                    content = article_data.text
-                    if hasattr(article_data, 'keywords'):
-                        keywords = article_data.keywords
-                    if hasattr(article_data, 'summary'):
-                        summary = article_data.summary
-                    if hasattr(article_data, 'top_image') and article_data.top_image:
-                        image_url = article_data.top_image
-                except Exception as ex:
-                    logger.warning(f"Full text extraction skipped for {link}: {ex}")
+                        content = article_data.text
+                        if hasattr(article_data, 'keywords'):
+                            keywords = article_data.keywords
+                        if hasattr(article_data, 'summary'):
+                            summary = article_data.summary
+                        if hasattr(article_data, 'top_image') and article_data.top_image:
+                            image_url = article_data.top_image
+                    except Exception as ex:
+                        logger.warning(f"Full text extraction skipped for {link}: {ex}")
             
             if not content:
                 # Fallback to summary
-                content = entry.get('summary', entry.get('description', ''))
+                content = pre_summary
             
             # Use newspaper3k summary if available and content fallback was used
             if not summary:
-                summary = entry.get('summary', entry.get('description', ''))[:250]
+                summary = pre_summary[:250]
                 
             # If content is still somehow empty or just whitespace, skip it
             if not content or not content.strip():
                  continue
                  
-            # Detect topics and priority score
+            # Detect topics and priority score (Final)
             intelligence = detect_topics_and_score(entry.title, content)
             
             # Use boolean flag to distinguish intelligence vs general news

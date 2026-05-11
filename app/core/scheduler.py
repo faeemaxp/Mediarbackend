@@ -13,7 +13,14 @@ logger = logging.getLogger(__name__)
 
 async def fetch_all_feeds():
     logger.info("Starting scheduled RSS fetch")
-    cursor = db.db.sources.find({"active": True})
+    # Only fetch active sources that aren't consistently failing (fail_count < 5)
+    cursor = db.db.sources.find({
+        "active": True,
+        "$or": [
+            {"health.fail_count": {"$exists": False}},
+            {"health.fail_count": {"$lt": 5}}
+        ]
+    })
     async for source in cursor:
         if source.get("rss_url"):
             try:
@@ -77,8 +84,8 @@ def setup_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
 
     # --- Data ingestion ---
-    # RSS feeds every 15 minutes
-    scheduler.add_job(fetch_all_feeds, "interval", minutes=15,
+    # RSS feeds every 30 minutes
+    scheduler.add_job(fetch_all_feeds, "interval", minutes=30,
                       id="rss_fetch", name="RSS Feed Fetch")
 
     # X / Twitter every hour
@@ -110,5 +117,5 @@ def setup_scheduler() -> AsyncIOScheduler:
                       id="weekly_cleanup", name="Weekly Article Cleanup")
 
     scheduler.start()
-    logger.info("Scheduler started with jobs: RSS(15m), X(1h), Briefings(3×/day), Digests(45m)")
+    logger.info("Scheduler started with jobs: RSS(30m), X(1h), Briefings(3×/day), Digests(45m)")
     return scheduler

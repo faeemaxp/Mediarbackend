@@ -134,18 +134,16 @@ def _build_live_alert_payload(article: dict, tag: str) -> dict:
     score = article.get("priority_score", 0)
 
     if score >= 90:
-        color, prefix, ping = 0xDC2626, "🔥 CRITICAL ALERT", True
+        color, prefix = 0xDC2626, "🔥 CRITICAL ALERT"
     elif score >= 75:
-        color, prefix, ping = 0xEA580C, "⚠️ HIGH PRIORITY", True
+        color, prefix = 0xEA580C, "⚠️ HIGH PRIORITY"
     elif score >= 50:
-        color, prefix, ping = 0xF59E0B, "⚡ PRIORITY INTEL", False
+        color, prefix = 0xF59E0B, "⚡ PRIORITY INTEL"
     else:
-        color, prefix, ping = 0x2563EB, "📡 NEW INTEL", False
+        color, prefix = 0x2563EB, "📡 NEW INTEL"
 
-    # User mention for urgent items
-    content = ""
-    if ping and settings.NOTIFICATION_USER_ID:
-        content = f"<@{settings.NOTIFICATION_USER_ID}> {prefix}"
+    # Use only prefix for the message content (no user mentions)
+    content = prefix
 
     desc = (article.get("summary") or article.get("content", ""))[:480]
     if len(desc) == 480:
@@ -365,13 +363,18 @@ async def _notification_worker():
                 logger.info(f"[SmartStagger] Staggering next alert for {int(sleep_for)}s to prevent overwhelm...")
                 await asyncio.sleep(sleep_for)
 
-            # AI ENHANCEMENT: Generate a punchy blurb for high-priority items
+            # AI ENHANCEMENT: Generate a punchy blurb for critical items (score >= 90) to cut down Gemini API costs
             score = article.get("priority_score", 0)
-            if score >= 75 and not article.get("ai_blurb"):
+            if score >= 90 and not article.get("ai_blurb"):
                 try:
                     from app.services.gemini_service import gemini_service
+                    # Pass summary or truncated content to save on API token costs
+                    short_content = article.get("summary", "")
+                    if not short_content:
+                        short_content = article.get("content", "")[:500]
+                        
                     blurb = await gemini_service.generate_notification_blurb(
-                        article["title"], article.get("content", ""), tag
+                        article["title"], short_content, tag
                     )
                     if blurb:
                         article["ai_blurb"] = blurb
