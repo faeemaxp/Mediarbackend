@@ -32,19 +32,25 @@ async def fetch_x_job():
 async def generate_periodic_briefing_job():
     logger.info("Generating scheduled periodic briefing")
     from app.services.briefing_service import generate_and_save_briefing
-    await generate_and_save_briefing(force=True)
+    from app.services.notification_service import send_briefing_notification
+    
+    content, timestamp, edition = await generate_and_save_briefing(force=True)
+    if edition:
+        await send_briefing_notification(content, edition)
 
 
 async def digest_job():
     """
     Periodic digest sender — runs every 45 minutes.
-    Each Discord channel receives a randomly-styled notification
-    (Breaking / Digest / Roundup) based on what articles exist.
-    Per-channel cooldowns prevent spam even if this job fires frequently.
     """
     logger.info("Starting periodic channel digest job")
     from app.services.notification_service import send_all_digests
     await send_all_digests()
+
+async def weekly_report_job_trigger():
+    """Weekly Excel export job."""
+    from app.services.report_service import weekly_report_job
+    await weekly_report_job()
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +82,11 @@ def setup_scheduler() -> AsyncIOScheduler:
     # will naturally stagger and never all fire at exactly the same time.
     scheduler.add_job(digest_job, "interval", minutes=45,
                       id="digest_job", name="Discord Channel Digests")
+
+    # --- Weekly Excel Report (Every Monday at 9:00 AM UTC) ---
+    scheduler.add_job(weekly_report_job_trigger, "cron",
+                      day_of_week="mon", hour=9, minute=0,
+                      id="weekly_report", name="Weekly Excel Export")
 
     scheduler.start()
     logger.info("Scheduler started with jobs: RSS(15m), X(1h), Briefings(3×/day), Digests(45m)")

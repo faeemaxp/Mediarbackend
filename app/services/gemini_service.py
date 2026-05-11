@@ -5,6 +5,7 @@ import logging
 import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import re
+from typing import Optional
 
 settings = get_settings()
 logger = logging.getLogger(__name__)

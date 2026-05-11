@@ -122,10 +122,18 @@ async def push_test_article(article: ArticleCreate):
     return {"message": "Article injected", "id": str(result.inserted_id)}
 
 @router.post("/trigger-briefing", dependencies=[Depends(verify_admin)])
-async def trigger_briefing():
+async def trigger_briefing(background_tasks: BackgroundTasks):
     from app.services.briefing_service import generate_and_save_briefing
+    from app.services.notification_service import send_briefing_notification
+    
     content, created_at, edition = await generate_and_save_briefing(force=True)
-    return {"message": "Briefing triggered", "content": content, "created_at": created_at, "edition": edition}
+    
+    async def _post():
+        if edition:
+            await send_briefing_notification(content, edition)
+    background_tasks.add_task(_post)
+    
+    return {"message": "Briefing triggered and queued for #Briefings", "edition": edition}
 
 @router.post("/retag-all", dependencies=[Depends(verify_admin)])
 async def trigger_retag_all():
@@ -312,3 +320,25 @@ async def test_digest(tag: str = "General", background_tasks: BackgroundTasks = 
         await send_channel_digest(tag, webhook_url)
     asyncio.create_task(_run())
     return {"message": f"Digest triggered for #{tag}", "webhook_found": True}
+
+
+@router.post("/export-excel", dependencies=[Depends(verify_admin)])
+async def trigger_excel_export(
+    days: int = 7, 
+    min_score: int = 0,
+    tags: Optional[str] = None,
+    dest_tag: str = "General", 
+    background_tasks: BackgroundTasks = None
+):
+    """Manually trigger a customized Excel export and send to Discord."""
+    from app.services.report_service import generate_article_report, send_report_to_discord
+    
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+    
+    async def _process():
+        filepath = await generate_article_report(days=days, min_score=min_score, tags=tag_list)
+        if filepath:
+            await send_report_to_discord(filepath, channel_tag=dest_tag)
+            
+    background_tasks.add_task(_process)
+    return {"message": f"Custom Excel export started. Filtering: {days}d, Min Score: {min_score}, Tags: {tags or 'All'}"}

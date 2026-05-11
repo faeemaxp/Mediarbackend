@@ -21,4 +21,5 @@ aiohttp
 nltk
 apify-client
 disnake
-
+pandas
+openpyxl

@@ -27,8 +27,10 @@ settings = get_settings()
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-HOURLY_CAP = 20          # max live-alert sends per hour (all channels combined)
-MIN_GAP_SECONDS = 5      # min seconds between consecutive webhook POSTs
+HOURLY_CAP = 12          # Reduced to 12/hour (one every 5 mins avg) to prevent overwhelm
+MIN_GAP_SECONDS = 120    # At least 2 minutes between any two alerts
+MAX_GAP_SECONDS = 300    # Max 5 minutes wait
+MAX_QUEUE_SIZE = 15     # If more than 15 articles are waiting, we drop the oldest/lowest priority
 DIGEST_COOLDOWN = 1800   # min seconds between digests for the same channel (30 min)
 
 TAG_EMOJI = {
@@ -41,6 +43,8 @@ TAG_EMOJI = {
     "Politics":   "🏛️",
     "Tamil":      "🎌",
     "General":    "📡",
+    "Reports":    "📊",
+    "Briefings":  "🧠",
 }
 
 # ---------------------------------------------------------------------------
@@ -91,9 +95,15 @@ async def get_webhook_for_tag(tag: str) -> Optional[str]:
         "Religion":   settings.RELIGION_WEBHOOK_URL,
         "Election":   settings.ELECTION_WEBHOOK_URL,
         "Geopolitics": settings.GEOPOLITICS_WEBHOOK_URL,
+        "Reports":    settings.REPORTS_WEBHOOK_URL,
+        "Briefings":  settings.BRIEFINGS_WEBHOOK_URL,
     }
     if tag in env_map and env_map[tag]:
         return env_map[tag]
+
+    # Reports and Briefings NEVER fall back to the general webhook
+    if tag in ("Reports", "Briefings"):
+        return None
 
     return settings.DISCORD_WEBHOOK_URL
 
@@ -314,9 +324,25 @@ async def _notification_worker():
 
         try:
             now = datetime.now(timezone.utc)
+            
+            # SMART OVERWHELM PROTECTION:
+            # If the queue is getting large, drop articles with score < 60
+            if notification_queue.qsize() > 5 and article.get("priority_score", 0) < 60:
+                logger.info(f"[SmartStagger] Dropping low-priority article to clear backlog: {article['title'][:50]}")
+                notification_queue.task_done()
+                continue
 
-            # Hourly counter reset
+            # Hourly counter reset & BACKLOG DROP
             if now >= hour_reset_time + timedelta(hours=1):
+                logger.info(f"[SmartStagger] Hourly reset reached. Dropping {notification_queue.qsize()} stale articles from backlog.")
+                # Flush the queue
+                while not notification_queue.empty():
+                    try:
+                        notification_queue.get_nowait()
+                        notification_queue.task_done()
+                    except asyncio.QueueEmpty:
+                        break
+                
                 hourly_counter = 0
                 hour_reset_time = now
 
@@ -328,10 +354,16 @@ async def _notification_worker():
                 notification_queue.task_done()
                 continue
 
-            # Minimum gap between POSTs
+            # RELAXED STAGGERING:
+            # We wait a random amount of time between MIN and MAX gap
+            # to make the notifications feel "loose" and less like a bot blast.
+            wait_time = random.randint(MIN_GAP_SECONDS, MAX_GAP_SECONDS)
             elapsed = (now - last_sent_time).total_seconds()
-            if elapsed < MIN_GAP_SECONDS:
-                await asyncio.sleep(MIN_GAP_SECONDS - elapsed)
+            
+            if elapsed < wait_time:
+                sleep_for = wait_time - elapsed
+                logger.info(f"[SmartStagger] Staggering next alert for {int(sleep_for)}s to prevent overwhelm...")
+                await asyncio.sleep(sleep_for)
 
             # AI ENHANCEMENT: Generate a punchy blurb for high-priority items
             score = article.get("priority_score", 0)
@@ -554,6 +586,27 @@ async def send_channel_digest(tag: str, webhook_url: str):
                     logger.error(f"[Digest] #{tag} error {resp.status}: {body[:200]}")
     except Exception as exc:
         logger.error(f"[Digest] #{tag} exception: {exc}", exc_info=True)
+async def send_briefing_notification(content: str, edition: str):
+    """
+    Sends a formatted AI Intelligence Briefing to the #Briefings channel.
+    """
+    webhook_url = await get_webhook_for_tag("Briefings")
+    if not webhook_url:
+        logger.warning("No webhook configured for #Briefings channel")
+        return
+
+    emoji = TAG_EMOJI.get("Briefings", "🧠")
+    
+    embed = {
+        "title": f"{emoji} Intelligence Briefing — {edition.title()} Edition",
+        "description": content[:4000],  # Discord limit
+        "color": 0x3B82F6,  # Blue
+        "footer": {"text": f"MediaRadar Intelligence Synthesis · {edition.title()}"},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        await session.post(webhook_url, json={"embeds": [embed]})
 
 
 async def send_all_digests():

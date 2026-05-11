@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     RELIGION_WEBHOOK_URL: Optional[str] = None
     ELECTION_WEBHOOK_URL: Optional[str] = None
     GEOPOLITICS_WEBHOOK_URL: Optional[str] = None
+    REPORTS_WEBHOOK_URL: Optional[str] = None
+    BRIEFINGS_WEBHOOK_URL: Optional[str] = None
     
     class Config:
         env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")

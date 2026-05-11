@@ -216,8 +216,89 @@ class DiscordBot(commands.Bot):
         except Exception:
             await inter.response.send_message(msg, ephemeral=True)
 
+    async def on_command_error(self, ctx: commands.Context, error: Exception):
+        if isinstance(error, commands.CommandNotFound):
+            return
+        logger.error(f"Prefix command error: {error}")
+        await ctx.send(f"❌ Error: {error}")
+
 
 bot = DiscordBot()
+
+
+# ---------------------------------------------------------------------------
+# Prefix Commands
+# ---------------------------------------------------------------------------
+
+@bot.command(name="setup")
+@commands.has_permissions(manage_channels=True)
+async def prefix_setup(ctx: commands.Context):
+    """Setup all channels and webhooks automatically."""
+    msg = await ctx.send("🚀 Starting automatic pipeline setup...")
+    
+    try:
+        category = disnake.utils.get(ctx.guild.categories, name="MEDIA RADAR")
+        if not category:
+            category = await ctx.guild.create_category("MEDIA RADAR")
+
+        # Include the new Reports and Briefings tags
+        all_tags = TAGS + ["General", "Reports", "Briefings"]
+        results = []
+
+        for tag in all_tags:
+            channel_name = tag.lower().replace(" ", "-")
+            channel = disnake.utils.get(category.text_channels, name=channel_name)
+
+            if not channel:
+                channel = await ctx.guild.create_text_channel(
+                    channel_name, category=category,
+                    topic=f"MediaRadar auto-feed for the {tag} intelligence pipeline"
+                )
+
+            existing_hooks = await channel.webhooks()
+            hook = disnake.utils.get(existing_hooks, name=f"MediaRadar-{tag}")
+            if not hook:
+                hook = await channel.create_webhook(name=f"MediaRadar-{tag}")
+
+            await db.db.config_webhooks.update_one(
+                {"tag": tag},
+                {
+                    "$set": {
+                        "tag": tag,
+                        "webhook_url": hook.url,
+                        "channel_id": str(channel.id),
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
+                upsert=True,
+            )
+            results.append(f"{TAG_EMOJI.get(tag, '🏷️')} #{channel_name}")
+
+        summary = "\n".join(results)
+        await msg.edit(content=f"✅ **Intelligence Pipeline Ready!**\n{summary}")
+
+    except Exception as exc:
+        await msg.edit(content=f"❌ Setup failed: {exc}")
+
+
+@bot.command(name="setwebhook")
+@commands.has_permissions(administrator=True)
+async def prefix_setwebhook(ctx: commands.Context, tag: str, url: str):
+    """Manually set a webhook for a specific tag. Usage: !setwebhook Reports <url>"""
+    await db.db.config_webhooks.update_one(
+        {"tag": tag},
+        {"$set": {"tag": tag, "webhook_url": url, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True
+    )
+    await ctx.send(f"✅ Webhook for `#{tag}` updated successfully.")
+
+
+@bot.command(name="prefix")
+@commands.has_permissions(administrator=True)
+async def prefix_change(ctx: commands.Context, new_prefix: str):
+    """Change the bot's command prefix."""
+    bot.command_prefix = new_prefix
+    await ctx.send(f"✅ Command prefix changed to `{new_prefix}`")
 
 
 # ---------------------------------------------------------------------------
