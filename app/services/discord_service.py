@@ -3,6 +3,7 @@ from disnake.ext import commands
 import logging
 import asyncio
 import aiohttp
+import os
 from datetime import datetime, timezone
 from typing import Optional
 from app.core.config import get_settings
@@ -203,6 +204,72 @@ class DiscordBot(commands.Bot):
 
     async def on_ready(self):
         logger.info(f"✅ Discord bot ready: {self.user} (ID: {self.user.id})")
+        # Auto-configure on first boot
+        await self._auto_setup()
+
+    async def _auto_setup(self):
+        """
+        On startup, check if webhooks are already stored in DB.
+        If not, automatically create the MEDIA RADAR category,
+        all pipeline channels, and their webhooks — then save to DB.
+        """
+        if not self.guilds:
+            logger.warning("[AutoSetup] Bot is not in any guild yet — skipping auto-setup.")
+            return
+
+        # Check if any webhooks already exist in DB
+        existing = await db.db.config_webhooks.count_documents({})
+        if existing > 0:
+            logger.info(f"[AutoSetup] {existing} webhooks already configured — skipping auto-setup.")
+            return
+
+        guild = self.guilds[0]  # Use the first guild the bot is in
+        logger.info(f"[AutoSetup] Starting auto-setup in guild: {guild.name}")
+
+        all_tags = TAGS + ["General", "Reports", "Briefings"]
+        results = []
+
+        try:
+            # Create or find MEDIA RADAR category
+            category = disnake.utils.get(guild.categories, name="MEDIA RADAR")
+            if not category:
+                category = await guild.create_category("MEDIA RADAR")
+                logger.info("[AutoSetup] Created MEDIA RADAR category")
+
+            for tag in all_tags:
+                channel_name = tag.lower().replace(" ", "-")
+                channel = disnake.utils.get(category.text_channels, name=channel_name)
+
+                if not channel:
+                    channel = await guild.create_text_channel(
+                        channel_name, category=category,
+                        topic=f"MediaRadar auto-feed for the {tag} intelligence pipeline"
+                    )
+                    logger.info(f"[AutoSetup] Created #{channel_name}")
+
+                # Create or reuse webhook
+                existing_hooks = await channel.webhooks()
+                hook = disnake.utils.get(existing_hooks, name=f"MediaRadar-{tag}")
+                if not hook:
+                    hook = await channel.create_webhook(name=f"MediaRadar-{tag}")
+
+                # Save to DB
+                await db.db.config_webhooks.update_one(
+                    {"tag": tag},
+                    {"$set": {
+                        "tag": tag,
+                        "webhook_url": hook.url,
+                        "channel_id": str(channel.id),
+                        "updated_at": datetime.now(timezone.utc),
+                    }},
+                    upsert=True,
+                )
+                results.append(f"{TAG_EMOJI.get(tag, '🏷️')} #{channel_name}")
+
+            logger.info(f"[AutoSetup] ✅ Done! Configured: {', '.join(results)}")
+
+        except Exception as exc:
+            logger.error(f"[AutoSetup] Failed: {exc}", exc_info=True)
 
     async def on_slash_command_error(
         self,
@@ -233,10 +300,34 @@ bot = DiscordBot()
 @bot.command(name="setup")
 @commands.has_permissions(manage_channels=True)
 async def prefix_setup(ctx: commands.Context):
-    """Setup all channels and webhooks automatically."""
+    """Setup all channels and webhooks automatically (force re-run)."""
     msg = await ctx.send("🚀 Starting automatic pipeline setup...")
     
+    # Capture the admin's User ID to ping them on urgent alerts
+    user_id = str(ctx.author.id)
+    settings.NOTIFICATION_USER_ID = user_id
+    
+    # Update .env file safely
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+        with open(env_path, "w") as f:
+            found = False
+            for line in lines:
+                if line.startswith("NOTIFICATION_USER_ID="):
+                    f.write(f"NOTIFICATION_USER_ID={user_id}\n")
+                    found = True
+                else:
+                    f.write(line)
+            if not found:
+                f.write(f"\nNOTIFICATION_USER_ID={user_id}\n")
+    
     try:
+        existing = await db.db.config_webhooks.count_documents({})
+        if existing > 0:
+            await msg.edit(content=f"⚠️ {existing} webhooks already in DB. Re-running to sync...")
+
         category = disnake.utils.get(ctx.guild.categories, name="MEDIA RADAR")
         if not category:
             category = await ctx.guild.create_category("MEDIA RADAR")

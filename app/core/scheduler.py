@@ -53,6 +53,22 @@ async def weekly_report_job_trigger():
     await weekly_report_job()
 
 
+async def cleanup_old_articles_job():
+    """Weekly cleanup: delete non-saved articles older than 7 days."""
+    from app.db.mongodb import db
+    from datetime import timedelta
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    result = await db.db.articles.delete_many({
+        "published_at": {"$lt": cutoff},
+        "is_saved": {"$ne": True}   # always keep bookmarked articles
+    })
+    logger.info(f"[Cleanup] Deleted {result.deleted_count} articles older than 7 days")
+    return result.deleted_count
+
+
 # ---------------------------------------------------------------------------
 # Scheduler setup
 # ---------------------------------------------------------------------------
@@ -87,6 +103,11 @@ def setup_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(weekly_report_job_trigger, "cron",
                       day_of_week="mon", hour=9, minute=0,
                       id="weekly_report", name="Weekly Excel Export")
+
+    # --- Weekly DB Cleanup (Every Sunday at 00:00 UTC) ---
+    scheduler.add_job(cleanup_old_articles_job, "cron",
+                      day_of_week="sun", hour=0, minute=0,
+                      id="weekly_cleanup", name="Weekly Article Cleanup")
 
     scheduler.start()
     logger.info("Scheduler started with jobs: RSS(15m), X(1h), Briefings(3×/day), Digests(45m)")

@@ -342,3 +342,19 @@ async def trigger_excel_export(
             
     background_tasks.add_task(_process)
     return {"message": f"Custom Excel export started. Filtering: {days}d, Min Score: {min_score}, Tags: {tags or 'All'}"}
+
+
+@router.post("/cleanup-articles", dependencies=[Depends(verify_admin)])
+async def cleanup_old_articles(days: int = 7):
+    """Delete non-saved articles older than N days. Saved/bookmarked articles are always preserved."""
+    from app.core.scheduler import cleanup_old_articles_job
+    from datetime import timedelta
+    from app.db.mongodb import db
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    result = await db.db.articles.delete_many({
+        "published_at": {"$lt": cutoff},
+        "is_saved": {"$ne": True}
+    })
+    return {"message": f"Cleanup complete", "deleted": result.deleted_count, "older_than_days": days}
+
