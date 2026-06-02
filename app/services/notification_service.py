@@ -50,6 +50,8 @@ TAG_EMOJI = {
 # ---------------------------------------------------------------------------
 notification_queue: asyncio.Queue = asyncio.Queue()
 last_sent_time = datetime.min.replace(tzinfo=timezone.utc)
+hourly_counter = 0
+hour_reset_time = datetime.now(timezone.utc)
 
 
 # ===========================================================================
@@ -310,7 +312,7 @@ def _build_roundup_payload(articles: list, tag: str) -> dict:
 # ===========================================================================
 
 async def _notification_worker():
-    global last_sent_time
+    global last_sent_time, hourly_counter, hour_reset_time
 
     while True:
         # Each item: (article, webhook_url, tag)
@@ -319,6 +321,11 @@ async def _notification_worker():
         try:
             now = datetime.now(timezone.utc)
             
+            # Reset hourly counter if an hour has passed
+            if now >= hour_reset_time + timedelta(hours=1):
+                hourly_counter = 0
+                hour_reset_time = now
+
             # RELAXED STAGGERING:
             # We wait a random amount of time between MIN and MAX gap
             # to make the notifications feel "loose" and less like a bot blast.
@@ -370,6 +377,7 @@ async def _notification_worker():
                         logger.error(f"Webhook error {resp.status} for #{tag}: {body[:200]}")
 
             last_sent_time = datetime.now(timezone.utc)
+            hourly_counter += 1
 
         except Exception as exc:
             logger.error(f"Notification worker error: {exc}", exc_info=True)
