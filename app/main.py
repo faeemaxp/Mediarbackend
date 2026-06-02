@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
 
 from app.core.scheduler import setup_scheduler
@@ -65,6 +66,159 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {"message": "Welcome to MediaRadar API"}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+@app.get("/wakeup", response_class=HTMLResponse)
+async def wakeup():
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>MediaRadar - Waking Up</title>
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+        <style>
+            body {
+                background-color: #09090b;
+                color: #f4f4f5;
+                font-family: 'Outfit', sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                margin: 0;
+                overflow: hidden;
+            }
+            .container {
+                text-align: center;
+                max-width: 500px;
+                padding: 40px;
+                background: rgba(24, 24, 27, 0.4);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(63, 63, 70, 0.3);
+                border-radius: 24px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            }
+            .icon-container {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 64px;
+                height: 64px;
+                background: #2563eb;
+                border-radius: 20px;
+                margin: 0 auto 24px auto;
+                box-shadow: 0 0 30px rgba(37, 99, 235, 0.4);
+                animation: pulse 2s infinite ease-in-out;
+            }
+            .icon {
+                width: 32px;
+                height: 32px;
+                fill: currentColor;
+            }
+            h1 {
+                font-size: 28px;
+                font-weight: 700;
+                margin: 0 0 12px 0;
+                letter-spacing: -0.025em;
+                background: linear-gradient(to right, #ffffff, #a1a1aa);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            p {
+                color: #a1a1aa;
+                font-size: 15px;
+                line-height: 1.6;
+                margin: 0 0 24px 0;
+            }
+            .loader {
+                width: 200px;
+                height: 4px;
+                background: #27272a;
+                border-radius: 2px;
+                margin: 0 auto 24px auto;
+                overflow: hidden;
+                position: relative;
+            }
+            .loader-bar {
+                width: 50%;
+                height: 100%;
+                background: #2563eb;
+                position: absolute;
+                border-radius: 2px;
+                animation: loading 1.5s infinite ease-in-out;
+            }
+            .status {
+                font-size: 12px;
+                color: #71717a;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                font-weight: 600;
+            }
+            @keyframes pulse {
+                0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(37, 99, 235, 0.4); }
+                50% { transform: scale(1.05); box-shadow: 0 0 45px rgba(37, 99, 235, 0.6); }
+            }
+            @keyframes loading {
+                0% { left: -50%; }
+                100% { left: 100%; }
+            }
+        </style>
+        <script>
+            async function checkStatus() {
+                try {
+                    const res = await fetch('/health');
+                    if (res.ok) {
+                        document.querySelector('h1').innerText = "Command Center Ready";
+                        document.querySelector('p').innerText = "MediaRadar and its Discord bot have successfully booted up.";
+                        document.querySelector('.loader-bar').style.width = "100%";
+                        document.querySelector('.loader-bar').style.left = "0";
+                        document.querySelector('.loader-bar').style.animation = "none";
+                        document.querySelector('.status').innerText = "ONLINE";
+                        document.querySelector('.status').style.color = "#10b981";
+                        
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const redirect = urlParams.get('redirect');
+                        if (redirect) {
+                            setTimeout(() => {
+                                window.location.href = redirect;
+                            }, 1500);
+                        }
+                    } else {
+                        setTimeout(checkStatus, 2000);
+                    }
+                } catch(e) {
+                    setTimeout(checkStatus, 2000);
+                }
+            }
+            window.addEventListener('DOMContentLoaded', () => {
+                setTimeout(checkStatus, 2000);
+            });
+        </script>
+    </head>
+    <body>
+        <div class="container">
+            <div class="icon-container">
+                <svg class="icon" viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+                </svg>
+            </div>
+            <h1>Initializing MediaRadar</h1>
+            <p>The Render server and Discord bot are waking up from hibernation. This may take a few moments...</p>
+            <div class="loader">
+                <div class="loader-bar"></div>
+            </div>
+            <div class="status">Connecting to service...</div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
 
 if __name__ == "__main__":
     import uvicorn

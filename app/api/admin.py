@@ -249,10 +249,94 @@ async def get_system_stats():
     saved_articles   = await db.db.articles.count_documents({"is_saved": True})
     high_priority    = await db.db.articles.count_documents({"priority_score": {"$gte": 75}})
 
+    # Average Priority Score
+    avg_priority_cursor = db.db.articles.aggregate([
+        {"$group": {"_id": None, "avg": {"$avg": "$priority_score"}}}
+    ])
+    avg_priority_res = await avg_priority_cursor.to_list(1)
+    avg_priority = round(avg_priority_res[0]["avg"], 1) if avg_priority_res else 0.0
+
     # Source health
     total_sources  = await db.db.sources.count_documents({})
     active_sources = await db.db.sources.count_documents({"active": True})
     failing_sources= await db.db.sources.count_documents({"health.status": "failing"})
+
+    # Scraping health averages
+    total_fail_count = 0
+    total_avg_response_time = 0.0
+    sources_with_response_time = 0
+    
+    async for src in db.db.sources.find():
+        health = src.get("health", {})
+        total_fail_count += health.get("fail_count", 0)
+        resp_time = health.get("avg_response_time", 0.0)
+        if resp_time > 0:
+            total_avg_response_time += resp_time
+            sources_with_response_time += 1
+            
+    avg_response_time = round(total_avg_response_time / sources_with_response_time, 2) if sources_with_response_time > 0 else 0.0
+
+    # Top sources by article count
+    top_sources_cursor = db.db.articles.aggregate([
+        {"$group": {"_id": "$source", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5}
+    ])
+    top_sources = []
+    async for doc in top_sources_cursor:
+        if doc["_id"]:
+            top_sources.append({"source": doc["_id"], "count": doc["count"]})
+
+    # 7-day ingestion volume trend
+    daily_volumes = []
+    for i in range(6, -1, -1):
+        target_day = now - timedelta(days=i)
+        date_str = target_day.strftime("%Y-%m-%d")
+        
+        start_date = datetime.combine(target_day.date(), datetime.min.time(), tzinfo=timezone.utc)
+        end_date = datetime.combine(target_day.date(), datetime.max.time(), tzinfo=timezone.utc)
+        
+        count = await db.db.articles.count_documents({"published_at": {"$gte": start_date, "$lte": end_date}})
+        high_pri_count = await db.db.articles.count_documents({
+            "published_at": {"$gte": start_date, "$lte": end_date},
+            "priority_score": {"$gte": 50}
+        })
+        daily_volumes.append({"date": date_str, "count": count, "high_priority": high_pri_count})
+
+    # Top extracted entities (last 7 days)
+    last_7d = now - timedelta(days=7)
+    
+    # Top People
+    people_cursor = db.db.articles.aggregate([
+        {"$match": {
+            "published_at": {"$gte": last_7d},
+            "people": {"$exists": True, "$type": "array", "$ne": []}
+        }},
+        {"$unwind": "$people"},
+        {"$group": {"_id": "$people", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5}
+    ])
+    top_people = []
+    async for doc in people_cursor:
+        if doc["_id"]:
+            top_people.append({"name": doc["_id"], "count": doc["count"]})
+            
+    # Top Organizations
+    orgs_cursor = db.db.articles.aggregate([
+        {"$match": {
+            "published_at": {"$gte": last_7d},
+            "organizations": {"$exists": True, "$type": "array", "$ne": []}
+        }},
+        {"$unwind": "$organizations"},
+        {"$group": {"_id": "$organizations", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5}
+    ])
+    top_orgs = []
+    async for doc in orgs_cursor:
+        if doc["_id"]:
+            top_orgs.append({"name": doc["_id"], "count": doc["count"]})
 
     # Per-pipeline breakdown
     TAGS = ["BJP", "Congress", "RSS", "Religion", "Election", "Geopolitics", "Politics", "Tamil"]
@@ -290,11 +374,14 @@ async def get_system_stats():
             "last_1h": articles_1h,
             "saved": saved_articles,
             "high_priority": high_priority,
+            "avg_priority": avg_priority,
         },
         "sources": {
             "total": total_sources,
             "active": active_sources,
             "failing": failing_sources,
+            "avg_response_time": avg_response_time,
+            "total_fail_count": total_fail_count,
         },
         "pipelines": pipeline_counts,
         "notifications": {
@@ -304,6 +391,12 @@ async def get_system_stats():
         },
         "briefing": briefing_info,
         "digest_states": digest_states,
+        "top_sources": top_sources,
+        "daily_volumes": daily_volumes,
+        "top_entities": {
+            "people": top_people,
+            "organizations": top_orgs,
+        },
         "generated_at": now,
     }
 

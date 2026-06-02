@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 from app.core.config import get_settings
-from app.core.scheduler import fetch_all_feeds, fetch_x_job
+from app.core.scheduler import fetch_all_feeds
 from app.db.mongodb import db
 
 logger = logging.getLogger(__name__)
@@ -427,7 +427,6 @@ async def fetch_news(inter: disnake.ApplicationCommandInteraction):
     await inter.response.defer()
     try:
         await fetch_all_feeds()
-        await fetch_x_job()
         await inter.edit_original_response(content="✅ News fetch completed for all sources.")
     except Exception as exc:
         logger.error(f"Manual fetch error: {exc}")

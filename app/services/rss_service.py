@@ -62,9 +62,8 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
         return []
 
     articles = []
-    new_ingested = 0
     
-    for entry in feed.entries:
+    async def process_entry(entry):
         link = clean_url(entry.link)
         title_hash = generate_title_hash(entry.title)
         
@@ -77,14 +76,14 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
         })
         
         if existing:
-            continue
+            return None
             
         try:
             # Robust date parsing
             published_at = datetime.now(timezone.utc)
             if hasattr(entry, 'published_parsed') and entry.published_parsed:
                 try:
-                    published_at = datetime.fromtimestamp(time.mktime(entry.published_parsed), tz=timezone.utc)
+                    published_at = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                 except (ValueError, TypeError, OverflowError):
                     pass
             
@@ -155,7 +154,7 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
                 
             # If content is still somehow empty or just whitespace, skip it
             if not content or not content.strip():
-                 continue
+                 return None
                  
             # Detect topics and priority score (Final)
             intelligence = detect_topics_and_score(entry.title, content)
@@ -188,7 +187,6 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
             article_dict["created_at"] = datetime.now(timezone.utc)
             
             await db.db.articles.insert_one(article_dict)
-            articles.append(article_dict)
             
             # Elite Notification Trigger: Only alert for high priority (default 80+)
             from app.core.config import get_settings
@@ -196,10 +194,15 @@ async def fetch_rss_feed(feed_url: str, source_name: str) -> List[Dict]:
             if intelligence["score"] >= settings.MIN_PRIORITY_SCORE:
                 await send_discord_alert(article_dict)
             
-            new_ingested += 1
+            return article_dict
             
         except Exception as e:
             logger.error(f"Error processing article {entry.link}: {e}")
+            return None
+
+    results = await asyncio.gather(*(process_entry(e) for e in feed.entries))
+    articles = [r for r in results if r is not None]
+    new_ingested = len(articles)
             
     # Update health metrics
     await db.db.sources.update_one(

@@ -14,7 +14,7 @@ class MongoDB:
 db = MongoDB()
 
 async def connect_to_mongo():
-    db.client = AsyncIOMotorClient(settings.MONGODB_URL)
+    db.client = AsyncIOMotorClient(settings.MONGODB_URL, tz_aware=True)
     db.db = db.client[settings.DATABASE_NAME]
 
 async def close_mongo_connection():

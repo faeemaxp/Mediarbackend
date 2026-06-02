@@ -74,7 +74,7 @@ class GeminiService:
             # BUG-11: wrap blocking synchronous SDK call in thread pool
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
-                model="gemini-3.1-flash-lite",  # BUG-10: corrected model name
+                model="gemini-2.5-flash",  # BUG-10: corrected model name
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=[google_search_tool]
@@ -144,7 +144,7 @@ class GeminiService:
             # BUG-11: wrap blocking synchronous SDK call in thread pool
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
-                model="gemini-3.1-flash-lite",  # BUG-10: corrected model name
+                model="gemini-2.5-flash",  # BUG-10: corrected model name
                 contents=prompt
             )
             return response.text.strip()
@@ -197,7 +197,7 @@ class GeminiService:
             # BUG-11: wrap blocking synchronous SDK call in thread pool
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
-                model="gemini-3.1-flash-lite",  # BUG-10: corrected model name
+                model="gemini-2.5-flash",  # BUG-10: corrected model name
                 contents=prompt
             )
             return self._clean_markdown(response.text)
@@ -226,7 +226,7 @@ class GeminiService:
         try:
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
-                model="gemini-3.1-flash-lite",
+                model="gemini-2.5-flash",
                 contents=prompt
             )
             return self._clean_markdown(response.text)

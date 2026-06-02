@@ -425,7 +425,7 @@ def ensure_worker_started():
 # PART 4 — Live-alert public entry point  (called from rss_service / x_service)
 # ===========================================================================
 
-async def send_discord_alert(article: dict):
+async def send_discord_alert(article: dict, bypass_stagger: bool = False):
     """
     Route a freshly ingested article as a LIVE ALERT to exactly ONE channel —
     the channel whose tag has the highest topic_relevance score.
@@ -452,6 +452,35 @@ async def send_discord_alert(article: dict):
             "message": "Live alert skipped: no webhook",
             "details": {"title": article["title"], "primary_tag": primary_tag},
         })
+        return
+
+    if bypass_stagger:
+        try:
+            score = article.get("priority_score", 0)
+            if score >= 90 and not article.get("ai_blurb"):
+                try:
+                    from app.services.gemini_service import gemini_service
+                    short_content = article.get("summary", "")
+                    if not short_content:
+                        short_content = article.get("content", "")[:500]
+                    blurb = await gemini_service.generate_notification_blurb(
+                        article["title"], short_content, primary_tag
+                    )
+                    if blurb:
+                        article["ai_blurb"] = blurb
+                except Exception as e:
+                    logger.warning(f"Failed to generate AI blurb: {e}")
+
+            payload = _build_live_alert_payload(article, primary_tag)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(webhook_url, json=payload) as resp:
+                    if resp.status in (200, 204):
+                        logger.info(f"[#{primary_tag}] Direct live alert sent (bypassed stagger): {article['title'][:60]}")
+                    else:
+                        body = await resp.text()
+                        logger.error(f"Direct webhook error {resp.status} for #{primary_tag}: {body[:200]}")
+        except Exception as e:
+            logger.error(f"Failed to send direct alert: {e}", exc_info=True)
         return
 
     await notification_queue.put((article, webhook_url, primary_tag))

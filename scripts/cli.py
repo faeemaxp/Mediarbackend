@@ -152,27 +152,8 @@ def instagram_fetch(query: str = "#news", limit: int = 10):
 
 @app.command()
 def x_fetch(limit: int = 10):
-    """Fetch trending posts from right-wing media on X using Apify."""
-    import asyncio
-    
-    async def run_fetch():
-        from app.db.mongodb import connect_to_mongo, close_mongo_connection
-        from app.services.x_service import fetch_x_news
-        from dotenv import load_dotenv
-        
-        load_dotenv()
-        await connect_to_mongo()
-        
-        print(f"Fetching {limit} latest posts from right-wing media on X...")
-        articles = await fetch_x_news(limit=limit)
-        
-        print(f"Finished! Ingested {len(articles)} new articles.")
-        for art in articles:
-            print(f"- {art['title']} ({art['url']})")
-            
-        await close_mongo_connection()
-
-    asyncio.run(run_fetch())
+    """Fetch trending posts from right-wing media on X using Apify (Disabled)."""
+    print("X/Twitter scraping features have been disabled as requested.")
 
 @app.command()
 def push_latest_to_discord():

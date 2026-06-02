@@ -59,7 +59,11 @@ async def generate_and_save_briefing(force: bool = False):
         return "No significant intelligence gathered in the last 72 hours to generate a briefing.", datetime.now(timezone.utc), None
         
     # Use the new periodic briefing generator
-    briefing_content = await gemini_service.generate_periodic_briefing(top_articles, time_of_day)
+    try:
+        briefing_content = await gemini_service.generate_periodic_briefing(top_articles, time_of_day)
+    except Exception as e:
+        logger.error(f"Failed to generate periodic briefing: {e}")
+        briefing_content = None
     
     if briefing_content:
         new_briefing = {
