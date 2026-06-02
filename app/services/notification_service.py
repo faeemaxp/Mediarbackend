@@ -48,12 +48,8 @@ TAG_EMOJI = {
 }
 
 # ---------------------------------------------------------------------------
-# Rate-limiting state (live alerts)
-# ---------------------------------------------------------------------------
 notification_queue: asyncio.Queue = asyncio.Queue()
 last_sent_time = datetime.min.replace(tzinfo=timezone.utc)
-hourly_counter = 0
-hour_reset_time = datetime.now(timezone.utc)
 
 
 # ===========================================================================
@@ -314,7 +310,7 @@ def _build_roundup_payload(articles: list, tag: str) -> dict:
 # ===========================================================================
 
 async def _notification_worker():
-    global last_sent_time, hourly_counter, hour_reset_time
+    global last_sent_time
 
     while True:
         # Each item: (article, webhook_url, tag)
@@ -323,35 +319,6 @@ async def _notification_worker():
         try:
             now = datetime.now(timezone.utc)
             
-            # SMART OVERWHELM PROTECTION:
-            # If the queue is getting large, drop articles with score < 60
-            if notification_queue.qsize() > 5 and article.get("priority_score", 0) < 60:
-                logger.info(f"[SmartStagger] Dropping low-priority article to clear backlog: {article['title'][:50]}")
-                notification_queue.task_done()
-                continue
-
-            # Hourly counter reset & BACKLOG DROP
-            if now >= hour_reset_time + timedelta(hours=1):
-                logger.info(f"[SmartStagger] Hourly reset reached. Dropping {notification_queue.qsize()} stale articles from backlog.")
-                # Flush the queue
-                while not notification_queue.empty():
-                    try:
-                        notification_queue.get_nowait()
-                        notification_queue.task_done()
-                    except asyncio.QueueEmpty:
-                        break
-                
-                hourly_counter = 0
-                hour_reset_time = now
-
-            if hourly_counter >= HOURLY_CAP:
-                logger.warning(
-                    f"[Notifications] Hourly cap ({HOURLY_CAP}) reached — "
-                    f"skipping live alert: {article['title'][:60]}"
-                )
-                notification_queue.task_done()
-                continue
-
             # RELAXED STAGGERING:
             # We wait a random amount of time between MIN and MAX gap
             # to make the notifications feel "loose" and less like a bot blast.
@@ -388,8 +355,7 @@ async def _notification_worker():
                     if resp.status in (200, 204):
                         logger.info(
                             f"[#{tag}] Live alert sent: {article['title'][:60]} "
-                            f"(score={article.get('priority_score', 0)}, "
-                            f"hourly {hourly_counter + 1}/{HOURLY_CAP})"
+                            f"(score={article.get('priority_score', 0)})"
                         )
                     elif resp.status == 429:
                         data = await resp.json()
@@ -404,7 +370,6 @@ async def _notification_worker():
                         logger.error(f"Webhook error {resp.status} for #{tag}: {body[:200]}")
 
             last_sent_time = datetime.now(timezone.utc)
-            hourly_counter += 1
 
         except Exception as exc:
             logger.error(f"Notification worker error: {exc}", exc_info=True)

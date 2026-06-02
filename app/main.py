@@ -69,7 +69,32 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from app.services.discord_service import bot
+    from app.core.config import get_settings
+    settings = get_settings()
+    
+    db_ok = True
+    try:
+        from app.db.mongodb import db
+        if db.db is not None:
+            await db.db.command("ping")
+        else:
+            db_ok = False
+    except Exception:
+        db_ok = False
+
+    discord_ready = bot.is_ready() if bot else False
+    discord_ok = True
+    if settings.DISCORD_TOKEN:
+        discord_ok = discord_ready
+        
+    status = "ok" if (db_ok and discord_ok) else "degraded"
+    
+    return {
+        "status": status,
+        "database": "connected" if db_ok else "disconnected",
+        "discord_bot": "ready" if discord_ready else ("not_configured" if not settings.DISCORD_TOKEN else "failed_or_connecting")
+    }
 
 @app.get("/wakeup", response_class=HTMLResponse)
 async def wakeup():
@@ -174,20 +199,33 @@ async def wakeup():
                 try {
                     const res = await fetch('/health');
                     if (res.ok) {
-                        document.querySelector('h1').innerText = "Command Center Ready";
-                        document.querySelector('p').innerText = "MediaRadar and its Discord bot have successfully booted up.";
-                        document.querySelector('.loader-bar').style.width = "100%";
-                        document.querySelector('.loader-bar').style.left = "0";
-                        document.querySelector('.loader-bar').style.animation = "none";
-                        document.querySelector('.status').innerText = "ONLINE";
-                        document.querySelector('.status').style.color = "#10b981";
-                        
-                        const urlParams = new URLSearchParams(window.location.search);
-                        const redirect = urlParams.get('redirect');
-                        if (redirect) {
-                            setTimeout(() => {
-                                window.location.href = redirect;
-                            }, 1500);
+                        const data = await res.json();
+                        if (data.status === "ok") {
+                            document.querySelector('h1').innerText = "Command Center Ready";
+                            document.querySelector('p').innerText = "MediaRadar and its Discord bot have successfully booted up.";
+                            document.querySelector('.loader-bar').style.width = "100%";
+                            document.querySelector('.loader-bar').style.left = "0";
+                            document.querySelector('.loader-bar').style.animation = "none";
+                            document.querySelector('.status').innerText = "ONLINE";
+                            document.querySelector('.status').style.color = "#10b981";
+                            
+                            const urlParams = new URLSearchParams(window.location.search);
+                            const redirect = urlParams.get('redirect');
+                            if (redirect) {
+                                setTimeout(() => {
+                                    window.location.href = redirect;
+                                }, 1500);
+                            }
+                        } else {
+                            // If degraded, display specific sub-service status
+                            let detail = "Waking up services...";
+                            if (data.database !== "connected") {
+                                detail = "Connecting database...";
+                            } else if (data.discord_bot === "failed_or_connecting") {
+                                detail = "Starting Discord bot...";
+                            }
+                            document.querySelector('.status').innerText = detail;
+                            setTimeout(checkStatus, 2000);
                         }
                     } else {
                         setTimeout(checkStatus, 2000);
@@ -197,7 +235,7 @@ async def wakeup():
                 }
             }
             window.addEventListener('DOMContentLoaded', () => {
-                setTimeout(checkStatus, 2000);
+                setTimeout(checkStatus, 1000);
             });
         </script>
     </head>
@@ -219,6 +257,7 @@ async def wakeup():
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
+
 
 if __name__ == "__main__":
     import uvicorn
